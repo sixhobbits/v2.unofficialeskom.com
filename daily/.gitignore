@@ -1,0 +1,12 @@
+data/*.duckdb
+data/*.duckdb.wal
+.venv/
+__pycache__/
+*.pyc
+.bruin/
+.bruin.yml
+logs/
+
+logs/runs
+logs/*.log
+*.py[cod]

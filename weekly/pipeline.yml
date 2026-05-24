@@ -1,0 +1,27 @@
+name: eskom-weekly
+schedule: weekly
+start_date: "2026-05-01"
+catchup: false
+
+retries: 2
+
+default_connections:
+    duckdb: "eskom_weekly"
+
+default:
+    type: duckdb.sql
+    rerun_cooldown: 30
+
+variables:
+    media_presentations_url:
+        type: string
+        default: "https://www.eskom.co.za/media-room/presentations/"
+    integrated_results_url:
+        type: string
+        default: "https://www.eskom.co.za/investors/integrated-results/"
+    news_url:
+        type: string
+        default: "https://www.eskom.co.za/category/news/"
+    news_max_pages:
+        type: string
+        default: ""

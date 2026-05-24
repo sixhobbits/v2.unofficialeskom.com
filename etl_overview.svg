@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#333"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #111; }
+      .subtitle { font: 18px Arial, sans-serif; fill: #444; }
+      .section { font: 700 22px Arial, sans-serif; fill: #111; }
+      .label { font: 700 17px Arial, sans-serif; fill: #111; }
+      .text { font: 15px Arial, sans-serif; fill: #222; }
+      .small { font: 13px Arial, sans-serif; fill: #333; }
+      .tiny { font: 12px Arial, sans-serif; fill: #444; }
+      .box { stroke: #333; stroke-width: 2; rx: 12; ry: 12; }
+      .source { fill: #e9f4ff; }
+      .pipeDaily { fill: #eef7ec; }
+      .pipeWeekly { fill: #fff4df; }
+      .cache { fill: #f7f1ff; }
+      .db { fill: #f0f0f0; }
+      .out { fill: #eaf7f5; }
+      .warn { fill: #fff0f0; stroke: #b24b4b; }
+      .arrow { stroke: #333; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #777; stroke-width: 2; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1050" fill="#fbfbfa"/>
+
+  <text x="60" y="60" class="title">Eskom ETL / ELT Overview</text>
+  <text x="60" y="92" class="subtitle">Big picture: websites are scraped, raw files are cached, Bruin writes tables into DuckDB, then parsers build useful rows.</text>
+
+  <!-- Sources -->
+  <text x="70" y="150" class="section">1. Eskom sources</text>
+  <rect x="60" y="175" width="300" height="120" class="box source"/>
+  <text x="85" y="205" class="label">Data Portal pages</text>
+  <text x="85" y="232" class="text">CSV + PowerBI pages</text>
+  <text x="85" y="256" class="small">supply build-up, UCLF/OCLF, EAF</text>
+
+  <rect x="60" y="325" width="300" height="125" class="box source"/>
+  <text x="85" y="355" class="label">Weekly status reports</text>
+  <text x="85" y="382" class="text">PDF reports from NTCSA/Eskom</text>
+  <text x="85" y="406" class="small">used for rooftop PV extraction</text>
+
+  <rect x="60" y="505" width="300" height="180" class="box source"/>
+  <text x="85" y="535" class="label">Document pages</text>
+  <text x="85" y="565" class="text">News / media statements</text>
+  <text x="85" y="590" class="text">Media-room presentations</text>
+  <text x="85" y="615" class="text">Investor integrated results</text>
+  <text x="85" y="645" class="small">annual reports, AFS, results decks</text>
+
+  <!-- Daily pipeline -->
+  <text x="450" y="150" class="section">2A. daily/ pipeline: operations</text>
+  <rect x="420" y="175" width="360" height="275" class="box pipeDaily"/>
+  <text x="445" y="205" class="label">daily/assets/raw/</text>
+  <text x="445" y="235" class="text">*_fetch.py</text>
+  <text x="565" y="235" class="small">scrape current source</text>
+  <text x="445" y="262" class="text">*_scrapes.sql</text>
+  <text x="565" y="262" class="small">append scrape log</text>
+  <text x="445" y="289" class="text">*_content.sql</text>
+  <text x="565" y="289" class="small">dedupe raw content</text>
+  <text x="445" y="316" class="text">*.py parser assets</text>
+  <text x="565" y="316" class="small">parse rows</text>
+  <line x1="445" y1="340" x2="755" y2="340" stroke="#9ab792"/>
+  <text x="445" y="370" class="label">daily/assets/staging/</text>
+  <text x="445" y="398" class="text">clean dashboard-ready tables</text>
+  <text x="445" y="425" class="small">outage_metrics, supply_build_up, rooftop_pv</text>
+
+  <!-- Weekly pipeline -->
+  <text x="450" y="510" class="section">2B. weekly/ pipeline: documents</text>
+  <rect x="420" y="535" width="360" height="330" class="box pipeWeekly"/>
+  <text x="445" y="565" class="label">weekly/assets/raw/</text>
+  <text x="445" y="595" class="text">news_fetch.py</text>
+  <text x="575" y="595" class="small">media statements</text>
+  <text x="445" y="622" class="text">media_presentations_fetch.py</text>
+  <text x="645" y="622" class="small">presentation PDFs</text>
+  <text x="445" y="649" class="text">integrated_results_fetch.py</text>
+  <text x="645" y="649" class="small">investor PDFs</text>
+  <line x1="445" y1="675" x2="755" y2="675" stroke="#c9a752"/>
+  <text x="445" y="705" class="text">*_scrapes.sql</text>
+  <text x="565" y="705" class="small">append scrape log</text>
+  <text x="445" y="732" class="text">*_content.sql</text>
+  <text x="565" y="732" class="small">dedupe by hash</text>
+  <text x="445" y="759" class="text">media_presentations.py</text>
+  <text x="620" y="759" class="small">PDF to text</text>
+  <text x="445" y="786" class="text">integrated_results.py</text>
+  <text x="600" y="786" class="small">PDF to text</text>
+  <text x="445" y="813" class="text">integrated_results_afs_topline.py</text>
+  <text x="675" y="813" class="small">AFS revenue</text>
+
+  <!-- File caches -->
+  <text x="870" y="150" class="section">3. Local file caches</text>
+  <rect x="850" y="175" width="345" height="125" class="box cache"/>
+  <text x="875" y="205" class="label">_rooftop_pdf_cache/</text>
+  <text x="875" y="232" class="text">Weekly_System_Status_Report_*.pdf</text>
+  <text x="875" y="256" class="small">PDF text is deduped into daily DB</text>
+
+  <rect x="850" y="535" width="345" height="135" class="box cache"/>
+  <text x="875" y="565" class="label">warehouse/media_presentations/pdfs/</text>
+  <text x="875" y="592" class="text">presentation PDFs + .txt</text>
+  <text x="875" y="618" class="small">existing PDFs are not re-downloaded</text>
+
+  <rect x="850" y="705" width="345" height="145" class="box cache"/>
+  <text x="875" y="735" class="label">warehouse/integrated_results/pdfs/</text>
+  <text x="875" y="762" class="text">AFS, annual reports, results PDFs</text>
+  <text x="875" y="788" class="text">cached .txt from pdftotext</text>
+  <text x="875" y="816" class="small">97 PDFs downloaded in standalone run</text>
+
+  <!-- DuckDBs -->
+  <text x="1270" y="150" class="section">4. DuckDB tables</text>
+  <rect x="1250" y="175" width="300" height="205" class="box db"/>
+  <text x="1275" y="205" class="label">warehouse/eskom.duckdb</text>
+  <text x="1275" y="232" class="text">daily operations DB</text>
+  <text x="1275" y="262" class="small">raw.supply_build_up_*</text>
+  <text x="1275" y="285" class="small">raw.uclf_oclf_*</text>
+  <text x="1275" y="308" class="small">raw.weekly_system_status_*</text>
+  <text x="1275" y="331" class="small">staging.outage_metrics_*</text>
+  <text x="1275" y="354" class="small">staging.rooftop_pv_monthly</text>
+
+  <rect x="1250" y="535" width="300" height="250" class="box db"/>
+  <text x="1275" y="565" class="label">warehouse/media_presentations/</text>
+  <text x="1275" y="587" class="label">index.duckdb</text>
+  <text x="1275" y="615" class="text">weekly documents DB</text>
+  <text x="1275" y="645" class="small">raw.news_*</text>
+  <text x="1275" y="668" class="small">raw.media_presentations_*</text>
+  <text x="1275" y="691" class="small">raw.integrated_results_*</text>
+  <text x="1275" y="714" class="small">raw.integrated_results_afs_topline</text>
+  <text x="1275" y="750" class="tiny">Name is misleading: this DB now holds</text>
+  <text x="1275" y="770" class="tiny">all weekly document tables, not only presentations.</text>
+
+  <!-- Outputs -->
+  <text x="870" y="900" class="section">5. Main outputs</text>
+  <rect x="850" y="925" width="700" height="80" class="box out"/>
+  <text x="875" y="955" class="label">Queryable tables and dashboard inputs</text>
+  <text x="875" y="982" class="text">Operational time series in daily staging tables; document text and AFS revenue in weekly raw tables.</text>
+
+  <!-- Warning note -->
+  <rect x="60" y="745" width="300" height="165" class="box warn"/>
+  <text x="85" y="775" class="label">Concurrency rule</text>
+  <text x="85" y="805" class="text">DuckDB supports one writer</text>
+  <text x="85" y="830" class="text">per database file.</text>
+  <text x="85" y="862" class="small">Do not run two Bruin jobs that write</text>
+  <text x="85" y="882" class="small">to the same .duckdb at the same time.</text>
+
+  <!-- Arrows from sources -->
+  <path d="M360 235 L420 235" class="arrow"/>
+  <path d="M360 388 L420 388" class="arrow"/>
+  <path d="M360 595 L420 595" class="arrow"/>
+
+  <!-- Daily arrows -->
+  <path d="M780 250 L850 235" class="arrow"/>
+  <path d="M780 315 L1250 275" class="arrow"/>
+  <path d="M780 405 L1250 330" class="arrow"/>
+
+  <!-- Weekly arrows -->
+  <path d="M780 620 L850 602" class="arrow"/>
+  <path d="M780 650 L850 772" class="arrow"/>
+  <path d="M1195 602 L1250 640" class="arrow"/>
+  <path d="M1195 778 L1250 690" class="arrow"/>
+
+  <!-- DB to outputs -->
+  <path d="M1400 380 L1400 925" class="dash"/>
+  <path d="M1400 785 L1400 925" class="arrow"/>
+
+  <!-- Footnotes -->
+  <text x="60" y="982" class="tiny">Important: cached files and DuckDB tables are different things. PDF folders store bytes/text files; DuckDB stores scrape logs, hashes, parsed rows, and metrics.</text>
+  <text x="60" y="1005" class="tiny">Future cleanup idea: rename warehouse/media_presentations/index.duckdb to warehouse/documents.duckdb when no scraper is running.</text>
+</svg>

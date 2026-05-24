@@ -1,0 +1,21 @@
+name: eskom-data-portal
+schedule: daily
+start_date: "2026-05-10"
+catchup: false
+
+retries: 2
+
+default_connections:
+    duckdb: "eskom_warehouse"
+
+default:
+    type: duckdb.sql
+    rerun_cooldown: 30
+
+variables:
+    supply_build_up_page_url:
+        type: string
+        default: "https://www.eskom.co.za/dataportal/supply-side/station-build-up-for-yesterday/"
+    demand_capacity_page_url:
+        type: string
+        default: "https://www.eskom.co.za/dataportal/demand-side/system-hourly-demand-and-available-capacity/"

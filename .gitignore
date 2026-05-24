@@ -1,0 +1,43 @@
+# Generated data
+warehouse/
+_rooftop_pdf_cache/
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite-journal
+
+# Dashboard generated artifacts
+beta.unofficialeskom.com/static/dashboard-data.json
+beta.unofficialeskom.com/static/dashboard-ag.html
+beta.unofficialeskom.com/build/
+beta.unofficialeskom.com/.docusaurus/
+beta.unofficialeskom.com/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv-cache/
+
+# Bruin
+logs/
+.bruin/
+
+# Legacy / generated dashboard artifacts
+daily/dashboard-src/
+daily/dashboard/*.html
+
+# Cruft from earlier experiments
+test.txt
+.aglicense
+
+# Local notes with personal paths / SSH aliases — keep on disk, don't publish
+beta.unofficialeskom.com/AGENTS.md
+beta.unofficialeskom.com/CLAUDE.md
+daily/README.md
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
