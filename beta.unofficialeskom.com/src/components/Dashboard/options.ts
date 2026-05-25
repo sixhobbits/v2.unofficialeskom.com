@@ -54,13 +54,14 @@ type SeriesItem = {
 
 export function timeSeriesOption(
   series: SeriesItem[],
-  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean} = {},
+  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean; isMobile?: boolean} = {},
   P: Palette,
 ) {
   const unit = opts.unit ?? 'MW';
   const decimals = opts.decimals ?? 0;
   const yAxis = opts.yAxis;
   const hourly = !!opts.hourly;
+  const isMobile = !!opts.isMobile;
   const fmtTooltip = (params: any[]) => {
     if (!params || !params.length) return '';
     const lines = params.map((p) => {
@@ -110,6 +111,7 @@ export function timeSeriesOption(
       formatter: fmtTooltip,
     },
     legend: {
+      type: 'scroll',
       show: true,
       data: series.map((s) => s.name),
       top: 0,
@@ -121,10 +123,15 @@ export function timeSeriesOption(
       itemGap: 18,
       textStyle: {fontSize: 11, color: P.legend},
     },
-    grid: {top: 50, right: yAxis ? 64 : 18, bottom: 60, left: 56},
+    grid: {top: 50, right: yAxis ? 64 : 18, bottom: isMobile ? 90 : 70, left: 56},
     xAxis: {
       type: 'time',
-      axisLabel: {fontSize: 10, color: P.axisLabel},
+      axisLabel: {
+        fontSize: 10,
+        color: P.axisLabel,
+        hideOverlap: true,
+        margin: 10,
+      },
       axisLine: {lineStyle: {color: P.axisLine}},
       axisTick: {show: false},
       splitLine: {show: false},
@@ -145,19 +152,19 @@ export function timeSeriesOption(
         type: 'slider',
         start: 75,
         end: 100,
-        bottom: 8,
-        height: 22,
+        bottom: isMobile ? 14 : 8,
+        height: isMobile ? 44 : 30,
         throttle: 0,
         borderColor: P.dzBorder,
         fillerColor: P.dzFill,
-        handleSize: '110%',
+        handleSize: isMobile ? '120%' : '130%',
         handleStyle: {
           color: P.dzHandle,
           borderColor: P.dzBorderH,
-          borderWidth: 1.5,
+          borderWidth: isMobile ? 2 : 1.5,
         },
-        moveHandleSize: 6,
-        textStyle: {color: P.dzText, fontSize: 10},
+        moveHandleSize: isMobile ? 20 : 12,
+        textStyle: {color: P.dzText, fontSize: isMobile ? 12 : 11},
         brushSelect: false,
       },
     ],

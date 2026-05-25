@@ -6,6 +6,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import clsx from 'clsx';
 
 import {PALETTES, timeSeriesOption, eafGaugeOption, type Palette} from './options';
+import {Gauge} from './Gauge';
 import styles from './styles.module.css';
 
 type Point = [number, number | null];
@@ -232,12 +233,27 @@ export default function Dashboard(): ReactNode {
     return map;
   }, [data?.rooftopProvinces]);
 
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 720px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   const charts = useMemo(() => {
     if (!data) return null;
 
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-    const outageStack = timeSeriesOption(
+    const ts = (
+      series: Parameters<typeof timeSeriesOption>[0],
+      opts: Parameters<typeof timeSeriesOption>[1] = {},
+    ) => timeSeriesOption(series, {...opts, isMobile}, P);
+
+    const outageStack = ts(
       [
         {...AREA_STACK, name: 'EAF (available)', data: data.eafAvg, itemStyle: {color: '#43a047'}, areaStyle: {color: '#43a047', opacity: 0.85}},
         {...AREA_STACK, name: 'PCLF (planned)', data: data.pclfAvg, itemStyle: {color: '#1976d2'}, areaStyle: {color: '#1976d2', opacity: 0.85}},
@@ -256,33 +272,27 @@ export default function Dashboard(): ReactNode {
           axisTick: {show: false},
           splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
         },
-      },
-      P,
-    );
+      });
 
-    const renewables = timeSeriesOption(
+    const renewables = ts(
       [
         {...LINE_BASE, name: 'Wind', data: data.windAvg, lineStyle: {width: 1.4, color: '#26c6da'}, itemStyle: {color: '#26c6da'}},
         {...LINE_BASE, name: 'PV', data: data.pvAvg, lineStyle: {width: 1.4, color: '#fdd835'}, itemStyle: {color: '#fdd835'}},
         {...LINE_BASE, name: 'CSP', data: data.cspAvg, lineStyle: {width: 1.4, color: '#ef6c00'}, itemStyle: {color: '#ef6c00'}},
         {...LINE_BASE, name: 'Other RE', data: data.otherReAvg, lineStyle: {width: 1.4, color: '#9ccc65'}, itemStyle: {color: '#9ccc65'}},
       ],
-      {},
-      P,
-    );
+      {});
 
-    const rooftopPv = timeSeriesOption(
+    const rooftopPv = ts(
       (data.rooftopProvinces || []).map((prov) => ({
         type: 'line', stack: 'rooftop', name: prov, data: data.rooftopSeries[prov] || [],
         showSymbol: false, animation: false, smooth: false, step: 'end',
         lineStyle: {width: 0}, areaStyle: {color: rooftopColorByProv[prov], opacity: 0.85},
         itemStyle: {color: rooftopColorByProv[prov]},
       })),
-      {unit: 'MW', decimals: 1},
-      P,
-    );
+      {unit: 'MW', decimals: 1});
 
-    const rooftopPvPerHh = timeSeriesOption(
+    const rooftopPvPerHh = ts(
       (data.rooftopProvincesPerHh || []).map((prov) => ({
         type: 'line', stack: 'rooftop_per_hh', name: prov, data: data.rooftopSeriesPerHh[prov] || [],
         showSymbol: false, animation: false, smooth: false, step: 'end',
@@ -299,27 +309,21 @@ export default function Dashboard(): ReactNode {
           axisTick: {show: false},
           splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
         },
-      },
-      P,
-    );
+      });
 
-    const thermal = timeSeriesOption(
+    const thermal = ts(
       [
         {...LINE_BASE, name: 'Min (dashed)', data: data.thermalMin, lineStyle: {width: 1, color: '#ffab91', type: 'dashed'}, itemStyle: {color: '#ffab91'}},
         {...LINE_BASE, name: 'Average', data: data.thermalAvg, lineStyle: {width: 1.8, color: '#ff7043'}, itemStyle: {color: '#ff7043'}},
         {...LINE_BASE, name: 'Max (dashed)', data: data.thermalMax, lineStyle: {width: 1, color: '#bf360c', type: 'dashed'}, itemStyle: {color: '#bf360c'}},
       ],
-      {},
-      P,
-    );
+      {});
 
-    const nuclear = timeSeriesOption(
+    const nuclear = ts(
       [{...LINE_BASE, name: 'Average', data: data.nuclearAvg, lineStyle: {width: 1.6, color: '#ab47bc'}, areaStyle: {color: '#ab47bc', opacity: 0.15}, itemStyle: {color: '#ab47bc'}}],
-      {},
-      P,
-    );
+      {});
 
-    const ocgt = timeSeriesOption(
+    const ocgt = ts(
       [
         {
           type: 'bar',
@@ -348,9 +352,7 @@ export default function Dashboard(): ReactNode {
           z: 5,
         },
       ],
-      {},
-      P,
-    );
+      {});
 
     // Default the dataZoom window to roughly the last 14 days of the
     // ~1-year hourly window we publish.
@@ -359,7 +361,7 @@ export default function Dashboard(): ReactNode {
         ? Math.max(0, ((data.ocgtEskomHourly.length - 14 * 24) / data.ocgtEskomHourly.length) * 100)
         : 0;
     const ocgtRolling7d = rollingSumAvg(data.ocgtEskomHourly, data.ocgtIppHourly);
-    const ocgtHourly = timeSeriesOption(
+    const ocgtHourly = ts(
       [
         {
           ...AREA_STACK,
@@ -386,9 +388,7 @@ export default function Dashboard(): ReactNode {
           z: 5,
         },
       ],
-      {hourly: true},
-      P,
-    );
+      {hourly: true});
     // Override the default dataZoom (which times the visible window to the
     // last 25% via start:75) so the hourly chart opens on the last ~14d.
     (ocgtHourly as any).dataZoom = [
@@ -546,7 +546,7 @@ export default function Dashboard(): ReactNode {
       ],
     };
 
-    const genDemand = timeSeriesOption(
+    const genDemand = ts(
       [
         {...LINE_BASE, name: 'Available Capacity (daily avg)', data: withGapNulls(data.availableCapacityAvg), connectNulls: false, lineStyle: {width: 1.6, color: '#43a047'}, itemStyle: {color: '#43a047'}},
         {...LINE_BASE, name: 'Generation (daily avg)', data: data.genAvg, lineStyle: {width: 1.6, color: '#1976d2'}, itemStyle: {color: '#1976d2'}},
@@ -554,21 +554,17 @@ export default function Dashboard(): ReactNode {
         {...LINE_BASE, name: 'Demand (daily peak, dashed)', data: data.demandMax, lineStyle: {width: 1, color: '#d32f2f', type: 'dashed'}, itemStyle: {color: '#d32f2f'}},
         {...LINE_BASE, name: 'Headroom (capacity − demand)', data: withGapNulls(data.headroomAvg), connectNulls: false, lineStyle: {width: 1.4, color: '#ab47bc'}, itemStyle: {color: '#ab47bc'}},
       ],
-      {},
-      P,
-    );
+      {});
 
-    const trade = timeSeriesOption(
+    const trade = ts(
       [
         {...LINE_BASE, name: 'Imports', data: data.importsAvg, lineStyle: {width: 1.4, color: '#26a69a'}, areaStyle: {color: '#26a69a', opacity: 0.12}, itemStyle: {color: '#26a69a'}},
         {...LINE_BASE, name: 'Exports', data: data.exportsAvg, lineStyle: {width: 1.4, color: '#ef6c00'}, areaStyle: {color: '#ef6c00', opacity: 0.12}, itemStyle: {color: '#ef6c00'}},
       ],
-      {},
-      P,
-    );
+      {});
 
     return {outageStack, eafYoy, renewables, rooftopPv, rooftopPvPerHh, thermal, nuclear, ocgt, ocgtHourly, genDemand, uclfOclfYoy, trade};
-  }, [data, P, rooftopColorByProv]);
+  }, [data, P, rooftopColorByProv, isMobile]);
 
   if (err) return <div className={styles.loading}>Failed to load data: {err}</div>;
   if (!data || !charts) return <div className={styles.loading}>Loading…</div>;
@@ -585,13 +581,9 @@ export default function Dashboard(): ReactNode {
           <div className={styles.gaugeMeta}>
             <div className={styles.gaugeLabel}>Energy Availability Factor</div>
           </div>
-          <ReactECharts
-            option={eafGaugeOption(data.latestEaf, P)}
-            notMerge
-            lazyUpdate
-            style={{height: 140, width: '100%', flex: 1}}
-            opts={{renderer: 'canvas'}}
-          />
+          <div style={{flex: 1, minHeight: 140, display: 'flex'}}>
+            <Gauge value={data.latestEaf} />
+          </div>
         </div>
 
         {/* Row 1: col2..col5 */}

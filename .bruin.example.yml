@@ -1,0 +1,10 @@
+default_environment: default
+
+environments:
+    default:
+        connections:
+            duckdb:
+                - name: "eskom_warehouse"
+                  path: "warehouse/eskom.duckdb"
+                - name: "eskom_weekly"
+                  path: "warehouse/media_presentations/index.duckdb"

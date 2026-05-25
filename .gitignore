@@ -41,3 +41,8 @@ daily/README.md
 .idea/
 .vscode/
 *.swp
+
+logs/runs
+logs/*.log
+*.py[cod]
+.bruin.yml
