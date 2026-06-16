@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.supply_build_up
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

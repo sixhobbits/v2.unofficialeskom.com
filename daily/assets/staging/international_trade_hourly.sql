@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.international_trade_hourly
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

@@ -70,12 +70,29 @@ def _optional_int(value: str) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _load_known_urls() -> set[str]:
+    """Return article URLs already in news_content (empty set if table doesn't exist yet)."""
+    import duckdb
+    from pathlib import Path
+    db_path = Path(__file__).resolve().parents[3] / "warehouse" / "media_presentations" / "index.duckdb"
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+        rows = con.execute("SELECT article_url FROM raw.news_content WHERE article_url IS NOT NULL").fetchall()
+        con.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
 def materialize() -> pd.DataFrame:
     page_url = _bruin_var("news_url", "https://www.eskom.co.za/category/news/")
     max_pages = _optional_int(_bruin_var("news_max_pages", ""))
+    known_urls = _load_known_urls()
+    if known_urls:
+        print(f"  {len(known_urls)} articles already in news_content — will stop early.", flush=True)
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0, tzinfo=None)
     rows = []
-    for rec in fetch_news(page_url, max_pages=max_pages):
+    for rec in fetch_news(page_url, max_pages=max_pages, known_urls=known_urls):
         rows.append({"scraped_at": now, **rec})
     df = pd.DataFrame(rows, columns=[
         "scraped_at", "article_url", "canonical_url", "title",

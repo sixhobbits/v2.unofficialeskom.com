@@ -1,5 +1,7 @@
 /* @bruin
 name: raw.supply_build_up_csv_content
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

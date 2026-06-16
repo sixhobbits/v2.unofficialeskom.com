@@ -1,5 +1,7 @@
 /* @bruin
 name: raw.uclf_oclf_trend_csv_scrapes
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

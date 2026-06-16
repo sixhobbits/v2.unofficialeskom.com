@@ -219,15 +219,36 @@ def _queryable_visuals(metadata: dict) -> list[tuple[str, dict]]:
     return visuals
 
 
+# Month-granularity period labels with no day component: a bare YYYYMM
+# (e.g. 202603 = Mar 2026) or a range string that embeds them (e.g.
+# "202504 / 202604"). Returns the first month found, anchored to day 1 —
+# callers MAX over the rows, so this surfaces how far the dataset runs even
+# though the source carries no daily date axis.
+def _parse_period(text: str) -> dt.datetime | None:
+    m = re.search(r"(20\d{2})(0[1-9]|1[0-2])", text)
+    if m:
+        return dt.datetime(int(m.group(1)), int(m.group(2)), 1)
+    return None
+
+
 def _parse_axis(value: Any) -> dt.datetime | None:
     if isinstance(value, (int, float)) and value > 10_000_000_000:
         return dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc).replace(tzinfo=None)
-    if isinstance(value, str):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return dt.datetime.fromisoformat(text.rstrip("Z"))
+    except ValueError:
+        pass
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%Y/%m", "%Y-%m"):
         try:
-            return dt.datetime.fromisoformat(value.rstrip("Z"))
+            return dt.datetime.strptime(text, fmt)
         except ValueError:
-            pass
-    return None
+            continue
+    return _parse_period(text)
 
 
 # ---------- public API: fetch only ----------
@@ -250,7 +271,7 @@ def fetch_responses(page_url: str) -> dict[str, Any]:
       }
     """
     result: dict[str, Any] = {
-        "page_url": page_url, "report_id": None,
+        "page_url": page_url, "report_id": None, "embed_url": None,
         "metadata_json": None, "error": None, "visuals": [],
     }
 
@@ -264,6 +285,7 @@ def fetch_responses(page_url: str) -> dict[str, Any]:
         result["error"] = "no PowerBI iframe found"
         return result
 
+    result["embed_url"] = iframes[0]
     report_id = _decode_report_id(iframes[0])
     result["report_id"] = report_id
 

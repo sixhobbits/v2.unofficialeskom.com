@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.demand_capacity_hourly
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

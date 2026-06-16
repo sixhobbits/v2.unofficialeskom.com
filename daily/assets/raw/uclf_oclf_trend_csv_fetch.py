@@ -1,5 +1,7 @@
 """ @bruin
 name: raw.uclf_oclf_trend_csv_fetch
+tags:
+    - hourly
 connection: eskom_warehouse
 materialization:
     type: table

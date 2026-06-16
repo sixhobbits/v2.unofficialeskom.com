@@ -105,6 +105,75 @@ def parse_rooftop_section(txt: str) -> list[tuple[date, str, float]]:
     return rows
 
 
+def parse_report_meta(txt: str) -> dict | None:
+    """Pull the report's week number + covered date range from the title line,
+    e.g. 'Weekly System Status Report – 2026 Week 22 (25/05/2026 – 31/05/2026)'."""
+    m = re.search(
+        r"Week\s+(\d+)\s*\((\d{2}/\d{2}/\d{4})\s*[–-]\s*(\d{2}/\d{2}/\d{4})\)", txt
+    )
+    if not m:
+        return None
+    return {
+        "week": int(m.group(1)),
+        "period_start": m.group(2),
+        "period_end": m.group(3),
+        "period": f"{m.group(2)} – {m.group(3)}",
+    }
+
+
+# A "52 Week Outlook" row: 'DD-Mon-YY  WW  <8 MW columns>  [free-text notes]'.
+# The historic daily table on page 1 uses 'Mon 25/May/2026' instead, so it never
+# matches. Note Eskom writes September as 'Sept'.
+_OUTLOOK_ROW_RE = re.compile(r"^\s*(\d{1,2})-([A-Za-z]{3,4})-(\d{2})\s+(\d{1,3})\s+(.*)$")
+_OUTLOOK_COLS = [
+    "rsa_contracted_mw", "residual_forecast_mw", "available_dispatchable_mw",
+    "available_less_or_ua_mw", "planned_maint_mw", "unplanned_assumption_mw",
+    "planned_risk_mw", "likely_risk_mw",
+]
+
+
+def status_from_margin(likely_risk_mw: int) -> str:
+    """Map the 'Likely Risk Scenario' MW margin to the report's colour key:
+    Green = adequate; Yellow = short <1000 MW of reserves; Orange = 1001–2000;
+    Red = >2001 (short to meet demand + reserves). A positive margin is surplus."""
+    if likely_risk_mw >= 0:
+        return "green"
+    short = -likely_risk_mw
+    if short <= 1000:
+        return "yellow"
+    if short <= 2000:
+        return "orange"
+    return "red"
+
+
+def parse_status_outlook(txt: str) -> list[dict[str, Any]]:
+    """Parse the '52 Week Outlook' table into one dict per forecast week, with a
+    derived green/yellow/orange/red ``status`` (the PDF's cell colours are lost
+    by pdftotext, so they're re-derived from the Likely Risk Scenario margin)."""
+    out: list[dict[str, Any]] = []
+    for line in txt.split("\n"):
+        m = _OUTLOOK_ROW_RE.match(line)
+        if not m:
+            continue
+        dd, mon, yy, wk, rest = m.groups()
+        mon = mon.lower()
+        if mon not in _MONTHS:
+            continue
+        nums = re.findall(r"-?\d{3,6}", rest)
+        if len(nums) < 8:
+            continue
+        vals = [int(x) for x in nums[:8]]
+        try:
+            week_start = date(2000 + int(yy), _MONTHS[mon], int(dd))
+        except ValueError:
+            continue
+        row = {"week_start": week_start, "week_num": int(wk)}
+        row.update(dict(zip(_OUTLOOK_COLS, vals)))
+        row["status"] = status_from_margin(vals[7])
+        out.append(row)
+    return out
+
+
 def fetch_reports(cache_dir: Path) -> Iterable[dict[str, Any]]:
     """Yield one dict per report advertised in the WP feed.
 

@@ -12,9 +12,10 @@ depends:
     - raw.integrated_results
 
 description: |
-    Extracts the group revenue top line from final annual Eskom group AFS-like
-    PDFs discovered on the integrated-results page. Pure transform — no HTTP.
-    Interim PDFs and Nqaba Finance PDFs are excluded by filename.
+    Extracts key income statement lines (revenue, EBITDA, net profit, etc.)
+    from final annual Eskom group AFS PDFs using pdfplumber structured
+    extraction. One row per metric per PDF. Interim and Nqaba Finance PDFs
+    are excluded.
 
 columns:
     - name: content_hash
@@ -31,12 +32,6 @@ columns:
       type: VARCHAR
     - name: value_rm
       type: BIGINT
-    - name: source_line
-      type: VARCHAR
-    - name: line_number
-      type: BIGINT
-    - name: confidence
-      type: VARCHAR
     - name: error
       type: VARCHAR
 @bruin """
@@ -47,11 +42,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from eskom_portal.integrated_results import (
-    extract_revenue_topline,
-    infer_financial_year,
-    is_annual_afs_filename,
-)
+from eskom_portal.afs_income_statement import extract_income_statement
+from eskom_portal.integrated_results import infer_financial_year, is_annual_afs_filename
 
 DB_PATH = (
     Path(__file__).resolve().parents[3]
@@ -63,35 +55,75 @@ def materialize() -> pd.DataFrame:
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         rows = con.execute("""
-            SELECT content_hash, pdf_url, filename, text_content
+            SELECT content_hash, pdf_url, filename, pdf_path
             FROM raw.integrated_results
+            WHERE pdf_path IS NOT NULL
         """).fetchall()
     finally:
         con.close()
 
     out = []
-    for content_hash, pdf_url, filename, text_content in rows:
+    for content_hash, pdf_url, filename, pdf_path in rows:
         if not is_annual_afs_filename(filename):
             continue
 
         financial_year = infer_financial_year(filename)
-        metric = extract_revenue_topline(text_content, filename)
-        out.append({
-            "content_hash": content_hash,
-            "pdf_url": pdf_url,
-            "filename": filename,
-            "financial_year": financial_year,
-            "period_end": date(financial_year, 3, 31) if financial_year else None,
-            "metric": metric.metric,
-            "value_rm": metric.value_rm,
-            "source_line": metric.source_line,
-            "line_number": metric.line_number,
-            "confidence": metric.confidence,
-            "error": metric.error,
-        })
+        period_end = date(financial_year, 3, 31) if financial_year else None
+
+        if not Path(pdf_path).exists():
+            out.append({
+                "content_hash": content_hash,
+                "pdf_url": pdf_url,
+                "filename": filename,
+                "financial_year": financial_year,
+                "period_end": period_end,
+                "metric": None,
+                "value_rm": None,
+                "error": "pdf_path not found on disk",
+            })
+            continue
+
+        try:
+            metrics = extract_income_statement(pdf_path)
+        except Exception as exc:
+            out.append({
+                "content_hash": content_hash,
+                "pdf_url": pdf_url,
+                "filename": filename,
+                "financial_year": financial_year,
+                "period_end": period_end,
+                "metric": None,
+                "value_rm": None,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+
+        if not metrics:
+            out.append({
+                "content_hash": content_hash,
+                "pdf_url": pdf_url,
+                "filename": filename,
+                "financial_year": financial_year,
+                "period_end": period_end,
+                "metric": None,
+                "value_rm": None,
+                "error": "no income statement found",
+            })
+            continue
+
+        for metric_name, value in metrics.items():
+            out.append({
+                "content_hash": content_hash,
+                "pdf_url": pdf_url,
+                "filename": filename,
+                "financial_year": financial_year,
+                "period_end": period_end,
+                "metric": metric_name,
+                "value_rm": value,
+                "error": None,
+            })
 
     return pd.DataFrame(out, columns=[
         "content_hash", "pdf_url", "filename", "financial_year", "period_end",
-        "metric", "value_rm", "source_line", "line_number", "confidence",
-        "error",
+        "metric", "value_rm", "error",
     ])

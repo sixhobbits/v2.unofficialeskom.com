@@ -8,7 +8,7 @@ description: |
 
 materialization:
     type: table
-    strategy: create+replace
+    strategy: append
 
 depends:
     - raw.news_fetch

@@ -256,8 +256,16 @@ def fetch_article(article_url: str) -> dict[str, Any]:
     }
 
 
-def fetch_news(start_url: str, max_pages: int | None = None) -> Iterable[dict[str, Any]]:
-    """Yield one parsed article dict per article advertised in the news category."""
+def fetch_news(
+    start_url: str,
+    max_pages: int | None = None,
+    known_urls: set[str] | None = None,
+) -> Iterable[dict[str, Any]]:
+    """Yield one parsed article dict per article advertised in the news category.
+
+    known_urls: URLs already in the content store. Pagination stops as soon as
+    a full listing page contains only known URLs — avoids re-crawling history.
+    """
     seen_pages: set[str] = set()
     seen_articles: set[str] = set()
     next_url: str | None = start_url
@@ -323,5 +331,9 @@ def fetch_news(start_url: str, max_pages: int | None = None) -> Iterable[dict[st
                 }
 
         if max_pages is not None and pages_seen >= max_pages:
+            break
+        # Stop paginating if every article on this page was already known.
+        if known_urls and all(item.article_url in known_urls for item in items):
+            print(f"All articles on page {pages_seen} already known — stopping.", flush=True)
             break
         next_url = following_url

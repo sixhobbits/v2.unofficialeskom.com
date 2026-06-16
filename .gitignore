@@ -23,6 +23,9 @@ __pycache__/
 logs/
 .bruin/
 
+# Portal change-detector local state (HTTP validators)
+daily/.portal_change_state.json
+
 # Legacy / generated dashboard artifacts
 daily/dashboard-src/
 daily/dashboard/*.html

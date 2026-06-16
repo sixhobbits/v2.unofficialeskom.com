@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.eaf_monthly
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

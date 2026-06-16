@@ -1,11 +1,11 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import ReactECharts from 'echarts-for-react';
 import {useColorMode} from '@docusaurus/theme-common';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import clsx from 'clsx';
 
-import {PALETTES, timeSeriesOption, eafGaugeOption, type Palette} from './options';
+import {PALETTES, timeSeriesOption, type Palette} from './options';
 import {Gauge} from './Gauge';
 import styles from './styles.module.css';
 
@@ -28,10 +28,21 @@ type DashboardData = {
   demandMax: Point[];
   availableCapacityAvg: Point[];
   headroomAvg: Point[];
-  eafAvg: Point[];
   pclfAvg: Point[];
   uclfAvg: Point[];
-  oclfAvg: Point[];
+  clfPlanned: Point[];
+  clfUnplanned: Point[];
+  clfOther: Point[];
+  clfTotal: Point[];
+  iosAvg: Point[];
+  mlrAvg: Point[];
+  ilsAvg: Point[];
+  totalReductionAvg: Point[];
+  iosMax: Point[];
+  mlrMax: Point[];
+  ilsMax: Point[];
+  totalReductionMax: Point[];
+  pumpedAvg: Point[];
   importsAvg: Point[];
   exportsAvg: Point[];
   latestGen: number;
@@ -44,6 +55,16 @@ type DashboardData = {
   otherReAvg: Point[];
   uclfOclfXKeys: string[];
   uclfOclfByYear: Record<string, Array<number | null>>;
+  eafWeeks: number[];
+  eafByYear: Record<string, Array<number | null>>;
+  stationHourly: Record<string, Point[]>;
+  outageHourly: {eaf: Point[]; pclf: Point[]; uclf: Point[]; oclf: Point[]};
+  yoyMonths: number[];
+  genByYear: Record<string, Array<number | null>>;
+  demandByYear: Record<string, Array<number | null>>;
+  oclfAvg: Point[];
+  capacityByYear: Record<string, Array<number | null>>;
+  peakDemandByYear: Record<string, Array<number | null>>;
   rooftopProvinces: string[];
   rooftopSeries: Record<string, Point[]>;
   rooftopProvincesPerHh: string[];
@@ -75,11 +96,60 @@ const AREA_STACK = {
   lineStyle: {width: 0},
 } as const;
 
-function ChartCard({title, option}: {title: string; option: any}) {
+const RANGE_PRESETS: Array<{label: string; days: number | null}> = [
+  {label: '7D', days: 7},
+  {label: '1M', days: 30},
+  {label: '3M', days: 90},
+  {label: '1Y', days: 365},
+  {label: 'All', days: null},
+];
+
+export function ChartCard({title, option}: {title: string; option: any}) {
+  const chartRef = useRef<ReactECharts>(null);
+  // Presets only make sense on time-axis charts with a zoom slider — the
+  // category YoY charts get just the title.
+  const hasTimeZoom = option?.xAxis?.type === 'time' && option?.dataZoom;
+
+  const setRange = (days: number | null) => {
+    const inst = chartRef.current?.getEchartsInstance();
+    if (!inst) return;
+    if (days == null) {
+      inst.dispatchAction({type: 'dataZoom', start: 0, end: 100});
+      return;
+    }
+    // Window end = newest timestamp across all series, not "now" — some feeds
+    // lag a few days and an empty window would look broken.
+    let maxTs = -Infinity;
+    for (const s of option.series ?? []) {
+      const d = s?.data;
+      const last = Array.isArray(d) && d.length ? d[d.length - 1] : null;
+      const t = Array.isArray(last) ? last[0] : null;
+      if (typeof t === 'number' && t > maxTs) maxTs = t;
+    }
+    if (!isFinite(maxTs)) return;
+    inst.dispatchAction({type: 'dataZoom', startValue: maxTs - days * 86_400_000, endValue: maxTs});
+  };
+
   return (
     <div className={styles.card}>
-      <div className={styles.chartTitle}>{title}</div>
+      <div className={styles.chartHead}>
+        <div className={styles.chartTitle}>{title}</div>
+        {hasTimeZoom && (
+          <div className={styles.rangeBtns}>
+            {RANGE_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                className={styles.rangeBtn}
+                onClick={() => setRange(p.days)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <ReactECharts
+        ref={chartRef}
         option={option}
         notMerge
         lazyUpdate
@@ -108,22 +178,6 @@ function fmt1(n: number | null) {
   return n == null ? '–' : n.toFixed(1);
 }
 
-// ISO-week label "YYYY-Wnn" for a Date (UTC).
-function isoWeekKey(d: Date): {key: string; week: number; year: number} {
-  // Copy date, set to nearest Thursday: current date + 4 - current day number
-  // (where Mon=1 .. Sun=7). Per ISO-8601.
-  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const dayNum = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((+t - +yearStart) / 86400000 + 1) / 7);
-  return {
-    key: `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`,
-    week,
-    year: t.getUTCFullYear(),
-  };
-}
-
 // Insert explicit null points where the time series has gaps wider than
 // thresholdDays. ECharts otherwise draws a straight line across gaps; nulls
 // force connectNulls:false to actually break the line.
@@ -143,6 +197,28 @@ function withGapNulls(
     out.push([t, v]);
   }
   return out;
+}
+
+// Trailing N-point rolling mean of a single [ts, value] series (skips nulls).
+// Used to smooth the outage-split lines, which mix daily (bulk / trend CSV) and
+// weekly (system-status report, held flat per week) sources into one jagged +
+// stepped picture — a 7-day mean reads as a consistent trend.
+function rollingMean(
+  series: Array<[number, number | null]>,
+  win = 7,
+): Array<[number, number | null]> {
+  return series.map((pt, i) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = Math.max(0, i - win + 1); j <= i; j++) {
+      const v = series[j][1];
+      if (v != null) {
+        sum += v;
+        count++;
+      }
+    }
+    return [pt[0], count ? +(sum / count).toFixed(2) : null];
+  });
 }
 
 // Trailing N-hour rolling mean of (a[i] + b[i]). Series a and b are assumed
@@ -180,22 +256,198 @@ function rollingSumAvg(
   return out;
 }
 
-function weeklyAvg(daily: Array<[number, number | null]>): Array<{key: string; week: number; avg: number}> {
-  const buckets = new Map<string, {week: number; vals: number[]}>();
-  for (const [ts, v] of daily) {
-    if (v == null) continue;
-    const {key, week} = isoWeekKey(new Date(ts));
-    const b = buckets.get(key);
-    if (b) b.vals.push(v);
-    else buckets.set(key, {week, vals: [v]});
-  }
-  return [...buckets.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([key, {week, vals}]) => ({
-      key,
-      week,
-      avg: vals.reduce((s, v) => s + v, 0) / vals.length,
-    }));
+// A weekly year-over-year line chart on a shared Jan→Dec week axis: every year
+// overlaid, the current year drawn bold in `curColor`, earlier years fading to
+// progressively lighter grey (oldest lightest). By default only the current
+// year and the previous two are visible; the rest are toggleable in the legend.
+// Defensive against a stale cached JSON that predates the data fields — a
+// missing field degrades the card, never crashes the dashboard.
+function weeklyYoyOption(
+  byYearRaw: Record<string, Array<number | null>> | undefined,
+  weeksRaw: number[] | undefined,
+  opts: {curColor: string; yMin?: number; yMax?: number; defaultYears?: number; unit?: '%' | 'MW'},
+  P: Palette,
+  months: string[],
+) {
+  const isPct = (opts.unit ?? '%') === '%';
+  const fmtVal = (v: number) =>
+    isPct ? Number(v).toFixed(1) + '%' : Math.round(Number(v)).toLocaleString('en-US') + ' MW';
+  const fmtAxis = (v: number) => (isPct ? v + '%' : Number(v).toLocaleString('en-US'));
+  const byYear = byYearRaw ?? {};
+  const weeks = weeksRaw ?? [];
+  const years = Object.keys(byYear).sort();
+  const curYear = years[years.length - 1];
+  const past = years.filter((y) => y !== curYear); // ascending, oldest first
+  const grey = (year: string) => {
+    const n = past.length;
+    const i = past.indexOf(year);
+    const t = n <= 1 ? 1 : i / (n - 1); // 0 = oldest, 1 = most recent past
+    const g = Math.round(216 - (216 - 120) * t); // light grey → dark grey
+    return `rgb(${g},${g},${g})`;
+  };
+  // Month of the week starting `i*7` days into a reference (non-leap) year —
+  // used to drop a month label at the first week of each calendar month.
+  const weekMonth = (i: number) => new Date(Date.UTC(2025, 0, 1 + i * 7)).getUTCMonth();
+  const visible = opts.defaultYears ?? 3; // current + previous two
+  const selected: Record<string, boolean> = {};
+  years.forEach((y, i) => {
+    selected[y] = i >= years.length - visible;
+  });
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: P.tooltipBg,
+      borderColor: P.tooltipBorder,
+      borderWidth: 1,
+      textStyle: {color: P.tooltipText, fontSize: 12},
+      formatter: (params: any[]) => {
+        const wk = +String(params[0].axisValue).slice(1);
+        const lines = params
+          .filter((p: any) => p.value != null)
+          .sort((a: any, b: any) => Number(b.value) - Number(a.value))
+          .map((p: any) => p.marker + ' ' + p.seriesName + ': <b>' + fmtVal(p.value) + '</b>');
+        return '<div style="font-weight:600;margin-bottom:4px">Week ' + wk + '</div>' + lines.join('<br/>');
+      },
+    },
+    legend: {data: years, selected, top: 0, left: 'center', selectedMode: true, icon: 'rect', itemWidth: 14, itemHeight: 10, itemGap: 14, textStyle: {fontSize: 11, color: P.legend}},
+    grid: {top: 50, right: 18, bottom: 30, left: 56},
+    xAxis: {
+      type: 'category',
+      data: weeks.map((w) => 'W' + String(w).padStart(2, '0')),
+      boundaryGap: false,
+      axisLabel: {
+        interval: 0,
+        formatter: (_v: string, i: number) =>
+          i === 0 || weekMonth(i) !== weekMonth(i - 1) ? months[weekMonth(i)] : '',
+        fontSize: 10,
+        color: P.axisLabel,
+      },
+      axisTick: {alignWithLabel: true},
+      axisLine: {lineStyle: {color: P.axisLine}},
+      splitLine: {show: false},
+    },
+    yAxis: {
+      type: 'value',
+      min: opts.yMin,
+      max: opts.yMax,
+      scale: true,
+      axisLabel: {fontSize: 10, color: P.axisLabel, formatter: fmtAxis},
+      axisLine: {show: false},
+      axisTick: {show: false},
+      splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
+    },
+    series: [
+      ...past.map((year) => ({
+        name: year,
+        type: 'line',
+        data: byYear[year],
+        symbol: 'none',
+        showSymbol: false,
+        connectNulls: false,
+        animation: false,
+        z: 2,
+        lineStyle: {width: 1.2, color: grey(year)},
+        itemStyle: {color: grey(year)},
+      })),
+      ...(curYear
+        ? [{
+            name: curYear,
+            type: 'line',
+            data: byYear[curYear],
+            symbol: 'none',
+            showSymbol: false,
+            connectNulls: false,
+            animation: false,
+            z: 10,
+            lineStyle: {width: 3, color: opts.curColor},
+            itemStyle: {color: opts.curColor},
+          }]
+        : []),
+    ],
+  };
+}
+
+// Monthly generation/demand year-over-year: each year a line on a Jan→Dec month
+// axis — current year bold in curColor, earlier years fading grey (oldest
+// lightest). Defaults to the current year + previous two; the rest toggle in the
+// legend. Mirrors weeklyYoyOption on a 12-month category axis.
+export function monthlyYoyOption(
+  byYearRaw: Record<string, Array<number | null>> | undefined,
+  opts: {curColor: string; defaultYears?: number},
+  P: Palette,
+  monthNames: string[],
+) {
+  const fmtVal = (v: number) => Math.round(Number(v)).toLocaleString('en-US') + ' MW';
+  const byYear = byYearRaw ?? {};
+  const years = Object.keys(byYear).sort();
+  const curYear = years[years.length - 1];
+  const past = years.filter((y) => y !== curYear);
+  const grey = (year: string) => {
+    const n = past.length;
+    const i = past.indexOf(year);
+    const t = n <= 1 ? 1 : i / (n - 1);
+    const g = Math.round(216 - (216 - 120) * t);
+    return `rgb(${g},${g},${g})`;
+  };
+  const visible = opts.defaultYears ?? 3;
+  const selected: Record<string, boolean> = {};
+  years.forEach((y, i) => {
+    selected[y] = i >= years.length - visible;
+  });
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: P.tooltipBg,
+      borderColor: P.tooltipBorder,
+      borderWidth: 1,
+      textStyle: {color: P.tooltipText, fontSize: 12},
+      formatter: (params: any[]) => {
+        const mon = monthNames[params[0].dataIndex] ?? params[0].axisValue;
+        const lines = params
+          .filter((p: any) => p.value != null)
+          .sort((a: any, b: any) => Number(b.value) - Number(a.value))
+          .map((p: any) => p.marker + ' ' + p.seriesName + ': <b>' + fmtVal(p.value) + '</b>');
+        return '<div style="font-weight:600;margin-bottom:4px">' + mon + '</div>' + lines.join('<br/>');
+      },
+    },
+    legend: {data: years, selected, top: 0, left: 'center', icon: 'rect', itemWidth: 14, itemHeight: 10, itemGap: 14, textStyle: {fontSize: 11, color: P.legend}},
+    grid: {top: 50, right: 18, bottom: 30, left: 56},
+    xAxis: {
+      type: 'category',
+      data: monthNames,
+      boundaryGap: false,
+      axisLabel: {fontSize: 10, color: P.axisLabel},
+      axisTick: {alignWithLabel: true},
+      axisLine: {lineStyle: {color: P.axisLine}},
+      splitLine: {show: false},
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => Number(v).toLocaleString('en-US')},
+      axisLine: {show: false},
+      axisTick: {show: false},
+      splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
+    },
+    series: [
+      ...past.map((year) => ({
+        name: year, type: 'line', data: byYear[year],
+        symbol: 'none', showSymbol: false, connectNulls: false, animation: false, z: 2,
+        lineStyle: {width: 1.2, color: grey(year)}, itemStyle: {color: grey(year)},
+      })),
+      ...(curYear
+        ? [{
+            name: curYear, type: 'line', data: byYear[curYear],
+            symbol: 'none', showSymbol: false, connectNulls: false, animation: false, z: 10,
+            lineStyle: {width: 3, color: opts.curColor}, itemStyle: {color: opts.curColor},
+          }]
+        : []),
+    ],
+  };
 }
 
 export default function Dashboard(): ReactNode {
@@ -233,6 +485,30 @@ export default function Dashboard(): ReactNode {
     return map;
   }, [data?.rooftopProvinces]);
 
+  // Mobile stat carousel: which 2×2 page is in view. The wrappers are
+  // display:contents on desktop, so none of this affects the grid layout.
+  const statPagesRef = useRef<HTMLDivElement>(null);
+  const [statPage, setStatPage] = useState(0);
+  const onStatScroll = () => {
+    const el = statPagesRef.current;
+    if (!el) return;
+    let best = 0;
+    let bestDist = Infinity;
+    Array.from(el.children).forEach((kid, i) => {
+      const d = Math.abs((kid as HTMLElement).offsetLeft - el.scrollLeft);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    });
+    setStatPage(best);
+  };
+  const scrollToStatPage = (i: number) => {
+    const el = statPagesRef.current;
+    const kid = el?.children[i] as HTMLElement | undefined;
+    if (el && kid) el.scrollTo({left: kid.offsetLeft, behavior: 'smooth'});
+  };
+
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -253,26 +529,28 @@ export default function Dashboard(): ReactNode {
       opts: Parameters<typeof timeSeriesOption>[1] = {},
     ) => timeSeriesOption(series, {...opts, isMobile}, P);
 
-    const outageStack = ts(
+    // Capability loss factors in MW: planned / unplanned / other and their total.
+    const clf = ts(
       [
-        {...AREA_STACK, name: 'EAF (available)', data: data.eafAvg, itemStyle: {color: '#43a047'}, areaStyle: {color: '#43a047', opacity: 0.85}},
-        {...AREA_STACK, name: 'PCLF (planned)', data: data.pclfAvg, itemStyle: {color: '#1976d2'}, areaStyle: {color: '#1976d2', opacity: 0.85}},
-        {...AREA_STACK, name: 'UCLF (unplanned)', data: data.uclfAvg, itemStyle: {color: '#d32f2f'}, areaStyle: {color: '#d32f2f', opacity: 0.85}},
-        {...AREA_STACK, name: 'OCLF (other)', data: data.oclfAvg, itemStyle: {color: '#9e9e9e'}, areaStyle: {color: '#9e9e9e', opacity: 0.85}},
+        {...LINE_BASE, name: 'Planned (PCLF)', data: data.clfPlanned, lineStyle: {width: 1.4, color: '#f1c40f'}, itemStyle: {color: '#f1c40f'}},
+        {...LINE_BASE, name: 'Unplanned (UCLF)', data: data.clfUnplanned, lineStyle: {width: 1.4, color: '#e57373'}, itemStyle: {color: '#e57373'}},
+        {...LINE_BASE, name: 'Other (OCLF)', data: data.clfOther, lineStyle: {width: 1.4, color: '#4f9fe0'}, itemStyle: {color: '#4f9fe0'}},
+        {...LINE_BASE, name: 'Total', data: data.clfTotal, lineStyle: {width: 1.8, color: '#37474f'}, itemStyle: {color: '#37474f'}},
       ],
-      {
-        unit: '%',
-        decimals: 1,
-        yAxis: {
-          type: 'value',
-          min: 50,
-          max: 100,
-          axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => v + '%'},
-          axisLine: {show: false},
-          axisTick: {show: false},
-          splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
-        },
-      });
+      {unit: 'MW', decimals: 0});
+
+    // Demand-reduction tools (daily MW). Mostly zero with spikes during
+    // constrained periods, so each gets its own chart — daily average solid,
+    // daily peak as a dashed line (averages hide short, sharp curtailment).
+    const reductionChart = (avg: Point[], max: Point[], color: string) =>
+      ts([
+        {...LINE_BASE, name: 'Daily avg', data: avg, lineStyle: {width: 1.4, color}, areaStyle: {color, opacity: 0.12}, itemStyle: {color}},
+        {...LINE_BASE, name: 'Daily max', data: max, lineStyle: {width: 1, color, type: 'dashed'}, itemStyle: {color}},
+      ], {unit: 'MW', decimals: 1});
+    const iosChart = reductionChart(data.iosAvg, data.iosMax, '#5e35b1');
+    const mlrChart = reductionChart(data.mlrAvg, data.mlrMax, '#ef6c00');
+    const ilsChart = reductionChart(data.ilsAvg, data.ilsMax, '#00897b');
+    const totalReductionChart = reductionChart(data.totalReductionAvg, data.totalReductionMax, '#d32f2f');
 
     const renewables = ts(
       [
@@ -285,18 +563,16 @@ export default function Dashboard(): ReactNode {
 
     const rooftopPv = ts(
       (data.rooftopProvinces || []).map((prov) => ({
-        type: 'line', stack: 'rooftop', name: prov, data: data.rooftopSeries[prov] || [],
-        showSymbol: false, animation: false, smooth: false, step: 'end',
-        lineStyle: {width: 0}, areaStyle: {color: rooftopColorByProv[prov], opacity: 0.85},
+        type: 'bar', stack: 'rooftop', name: prov, data: data.rooftopSeries[prov] || [],
+        animation: false, large: true,
         itemStyle: {color: rooftopColorByProv[prov]},
       })),
       {unit: 'MW', decimals: 1});
 
     const rooftopPvPerHh = ts(
       (data.rooftopProvincesPerHh || []).map((prov) => ({
-        type: 'line', stack: 'rooftop_per_hh', name: prov, data: data.rooftopSeriesPerHh[prov] || [],
-        showSymbol: false, animation: false, smooth: false, step: 'end',
-        lineStyle: {width: 0}, areaStyle: {color: rooftopColorByProv[prov], opacity: 0.85},
+        type: 'bar', stack: 'rooftop_per_hh', name: prov, data: data.rooftopSeriesPerHh[prov] || [],
+        animation: false, large: true,
         itemStyle: {color: rooftopColorByProv[prov]},
       })),
       {
@@ -389,25 +665,13 @@ export default function Dashboard(): ReactNode {
         },
       ],
       {hourly: true});
-    // Override the default dataZoom (which times the visible window to the
-    // last 25% via start:75) so the hourly chart opens on the last ~14d.
-    (ocgtHourly as any).dataZoom = [
-      {
-        type: 'slider',
-        start: hourlyDefaultStart,
-        end: 100,
-        bottom: 8,
-        height: 22,
-        throttle: 0,
-        borderColor: P.dzBorder,
-        fillerColor: P.dzFill,
-        handleSize: '110%',
-        handleStyle: {color: P.dzHandle, borderColor: P.dzBorderH, borderWidth: 1.5},
-        moveHandleSize: 6,
-        textStyle: {color: P.dzText, fontSize: 10},
-        brushSelect: false,
-      },
-    ];
+    // Override the default window (last 25% via start:75) so the hourly chart
+    // opens on the last ~14d.
+    (ocgtHourly as any).dataZoom[0].start = hourlyDefaultStart;
+
+    const pumpedStorage = ts(
+      [{...LINE_BASE, name: 'Pumped storage generation (daily avg)', data: data.pumpedAvg, lineStyle: {width: 1.4, color: '#0277bd'}, areaStyle: {color: '#0277bd', opacity: 0.12}, itemStyle: {color: '#0277bd'}}],
+      {unit: 'MW', decimals: 1});
 
     const years = Object.keys(data.uclfOclfByYear);
     const uclfOclfYoy = {
@@ -463,88 +727,71 @@ export default function Dashboard(): ReactNode {
       })),
     };
 
-    const weeks = weeklyAvg(data.eafAvg);
-    // Drop trailing incomplete week so we don't compare a partial week
-    // against a full one in the rolled-forward comparison.
-    const completeWeeks = weeks.slice(0, weeks.length - 1);
-    const cur52 = completeWeeks.slice(-52);
-    const prev52 = completeWeeks.slice(-104, -52);
-    const eafYoy = {
-      backgroundColor: 'transparent',
-      tooltip: {
-        trigger: 'axis',
-        backgroundColor: P.tooltipBg,
-        borderColor: P.tooltipBorder,
-        borderWidth: 1,
-        textStyle: {color: P.tooltipText, fontSize: 12},
-        formatter: (params: any[]) => {
-          const idx = params[0].dataIndex;
-          const curWk = cur52[idx]?.key ?? '';
-          const prvWk = prev52[idx]?.key ?? '';
-          const lines = params.map((p: any) => {
-            const wk = p.seriesName.startsWith('Current') ? curWk : prvWk;
-            return p.marker + ' ' + wk + ': <b>' + (p.value != null ? Number(p.value).toFixed(1) + '%' : '–') + '</b>';
-          });
-          return lines.join('<br/>');
-        },
-      },
-      legend: {
-        data: ['Current 52 weeks', 'Previous 52 weeks (dashed)'],
-        top: 0,
-        left: 'center',
-        selectedMode: true,
-        icon: 'rect',
-        itemWidth: 14,
-        itemHeight: 10,
-        itemGap: 18,
-        textStyle: {fontSize: 11, color: P.legend},
-      },
-      grid: {top: 50, right: 18, bottom: 40, left: 56},
-      xAxis: {
-        type: 'category',
-        data: cur52.map((w) => 'W' + String(w.week).padStart(2, '0')),
-        boundaryGap: false,
-        axisLabel: {
-          interval: (i: number, v: string) => v === 'W01' || i === cur52.length - 1 || i % 8 === 0,
-          fontSize: 10,
-          color: P.axisLabel,
-        },
-        axisTick: {show: false},
-        axisLine: {lineStyle: {color: P.axisLine}},
-        splitLine: {show: false},
-      },
-      yAxis: {
-        type: 'value',
-        min: 50,
-        max: 100,
-        axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => v + '%'},
-        axisLine: {show: false},
-        axisTick: {show: false},
-        splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
-      },
-      series: [
-        {
-          name: 'Previous 52 weeks (dashed)',
-          type: 'line',
-          data: prev52.map((w) => w.avg),
-          symbol: 'none',
-          showSymbol: false,
-          animation: false,
-          lineStyle: {width: 1.5, color: '#90a4ae', type: 'dashed'},
-          itemStyle: {color: '#90a4ae'},
-        },
-        {
-          name: 'Current 52 weeks',
-          type: 'line',
-          data: cur52.map((w) => w.avg),
-          symbol: 'none',
-          showSymbol: false,
-          animation: false,
-          lineStyle: {width: 2.2, color: '#43a047'},
-          itemStyle: {color: '#43a047'},
-        },
+    // Weekly EAF (available) and total outages (planned + unplanned = 100 − EAF),
+    // each overlaid year-over-year on a shared Jan→Dec week axis.
+    const eafYoy = weeklyYoyOption(
+      data.eafByYear, data.eafWeeks, {curColor: '#2e9e4f', yMin: 45, yMax: 90}, P, months);
+    // Outage split as three lines over the full daily history, smoothed to a
+    // 7-day trailing mean so the daily (UCLF) and weekly-held (PCLF/OCLF)
+    // sources read as one consistent trend. Opens on the last ~3 months with a
+    // zoom slider (the YoY view lives in the EAF chart).
+    const outagesYoy = ts(
+      [
+        {...LINE_BASE, name: 'Unplanned (UCLF)', data: rollingMean(data.uclfAvg), lineStyle: {width: 1.6, color: '#e53935'}, itemStyle: {color: '#e53935'}},
+        {...LINE_BASE, name: 'Planned (PCLF)', data: rollingMean(data.pclfAvg), lineStyle: {width: 1.6, color: '#f1c40f'}, itemStyle: {color: '#f1c40f'}},
+        {...LINE_BASE, name: 'Other (OCLF)', data: rollingMean(data.oclfAvg), lineStyle: {width: 1.4, color: '#37474f'}, itemStyle: {color: '#37474f'}},
       ],
-    };
+      {unit: '%', decimals: 1});
+    const outageLen = data.uclfAvg.length;
+    (outagesYoy as any).dataZoom[0].start = outageLen > 90 ? ((outageLen - 90) / outageLen) * 100 : 0;
+
+    // Hourly detail for the last ~3 months (no lttb sampling — it misaligns
+    // stacked areas). Both open on the full 3-month window.
+    const stack = (name: string, d: Point[], color: string) => ({
+      type: 'line', name, data: d, stack: 'h', symbol: 'none', showSymbol: false,
+      large: true, animation: false, areaStyle: {color, opacity: 0.85}, lineStyle: {width: 0}, itemStyle: {color},
+    });
+    const STATION: Array<[string, string, string]> = [
+      ['coal', 'Coal', '#6d4c41'], ['nuclear', 'Nuclear', '#ab47bc'], ['ocgt', 'OCGT (diesel/gas)', '#ef6c00'],
+      ['hydro', 'Hydro', '#26a69a'], ['pumped', 'Pumped storage', '#5c6bc0'], ['imports', 'Imports', '#90a4ae'],
+      ['wind', 'Wind', '#26c6da'], ['pv', 'PV', '#fdd835'], ['otherRe', 'Other RE', '#9ccc65'],
+    ];
+    const stationHourly = ts(
+      STATION.map(([k, name, color]) => stack(name, data.stationHourly?.[k] ?? [], color)),
+      {hourly: true},
+    );
+    (stationHourly as any).dataZoom[0].start = 0;
+
+    const oh = data.outageHourly ?? {eaf: [], pclf: [], uclf: [], oclf: []};
+    const eafOutageHourly = ts(
+      [
+        stack('Unplanned (UCLF)', oh.uclf, '#e57373'),
+        stack('Planned (PCLF)', oh.pclf, '#f1c40f'),
+        stack('Other (OCLF)', oh.oclf, '#4f9fe0'),
+        // Plain line, no lttb sampling — sampling here duplicated EAF in the
+        // axis tooltip and isn't needed at hourly/3-month scale.
+        {type: 'line', name: 'EAF', data: oh.eaf, symbol: 'none', showSymbol: false, large: true, animation: false, lineStyle: {width: 1.6, color: '#2e9e4f'}, itemStyle: {color: '#2e9e4f'}, z: 5},
+      ],
+      {
+        unit: '%',
+        decimals: 1,
+        hourly: true,
+        yAxis: {
+          type: 'value', min: 0, max: 100,
+          axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => v + '%'},
+          axisLine: {show: false}, axisTick: {show: false},
+          splitLine: {lineStyle: {color: P.splitLine, type: 'dashed'}},
+        },
+      },
+    );
+    (eafOutageHourly as any).dataZoom[0].start = 0;
+    // Available capacity (weekly avg) and peak demand (weekly max), MW, YoY.
+    const capacityYoy = weeklyYoyOption(
+      data.capacityByYear, data.eafWeeks, {curColor: '#2e9e4f', unit: 'MW'}, P, months);
+    const peakDemandYoy = weeklyYoyOption(
+      data.peakDemandByYear, data.eafWeeks, {curColor: '#d9534f', unit: 'MW'}, P, months);
+    const genYoy = monthlyYoyOption(data.genByYear, {curColor: '#1976d2'}, P, months);
+    const demandYoy = monthlyYoyOption(data.demandByYear, {curColor: '#d32f2f'}, P, months);
 
     const genDemand = ts(
       [
@@ -563,11 +810,39 @@ export default function Dashboard(): ReactNode {
       ],
       {});
 
-    return {outageStack, eafYoy, renewables, rooftopPv, rooftopPvPerHh, thermal, nuclear, ocgt, ocgtHourly, genDemand, uclfOclfYoy, trade};
+    return {clf, iosChart, mlrChart, ilsChart, totalReductionChart, pumpedStorage, eafYoy, outagesYoy, stationHourly, eafOutageHourly, capacityYoy, peakDemandYoy, genYoy, demandYoy, renewables, rooftopPv, rooftopPvPerHh, thermal, nuclear, ocgt, ocgtHourly, genDemand, uclfOclfYoy, trade};
   }, [data, P, rooftopColorByProv, isMobile]);
 
   if (err) return <div className={styles.loading}>Failed to load data: {err}</div>;
   if (!data || !charts) return <div className={styles.loading}>Loading…</div>;
+
+  // Desktop grid order: first four = row 1 (cols 2–5), last four = row 2.
+  // Mobile: chunked into 2×2 carousel pages, four per page.
+  const stats: Array<{label: string; value: string; units: string}> = [
+    {label: 'Coal', value: fmt(lastVal(data.thermalAvg)), units: 'MW'},
+    {
+      label: 'Renewables',
+      value: fmt(
+        (lastVal(data.windAvg) ?? 0) +
+          (lastVal(data.pvAvg) ?? 0) +
+          (lastVal(data.cspAvg) ?? 0) +
+          (lastVal(data.otherReAvg) ?? 0),
+      ),
+      units: 'MW',
+    },
+    {label: 'Total Generation', value: fmt(data.latestGen), units: 'MW'},
+    {label: 'Planned (PCLF)', value: fmt1(lastVal(data.pclfAvg)) + '%', units: 'of fleet'},
+    {label: 'Nuclear', value: fmt(lastVal(data.nuclearAvg)), units: 'MW'},
+    {
+      label: 'OCGT',
+      value: fmt((lastVal(data.ocgtEskomMax) ?? 0) + (lastVal(data.ocgtIppMax) ?? 0)),
+      units: 'MW · peak',
+    },
+    {label: 'Total Demand', value: fmt(data.latestDemand), units: 'MW'},
+    {label: 'Unplanned (UCLF)', value: fmt1(lastVal(data.uclfAvg)) + '%', units: 'of fleet'},
+  ];
+  const statPages: Array<typeof stats> = [];
+  for (let i = 0; i < stats.length; i += 4) statPages.push(stats.slice(i, i + 4));
 
   return (
     <div className={styles.container}>
@@ -581,63 +856,38 @@ export default function Dashboard(): ReactNode {
           <div className={styles.gaugeMeta}>
             <div className={styles.gaugeLabel}>Energy Availability Factor</div>
           </div>
-          <div style={{flex: 1, minHeight: 140, display: 'flex'}}>
+          <div style={{flex: 1, minHeight: 180, display: 'flex'}}>
             <Gauge value={data.latestEaf} />
           </div>
+          {data.latestEafLabel && (
+            <div className={styles.gaugePeriod}>{data.latestEafLabel}</div>
+          )}
         </div>
 
-        {/* Row 1: col2..col5 */}
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Coal</div>
-          <div className={styles.statValue}>{fmt(lastVal(data.thermalAvg))}</div>
-          <div className={styles.statUnits}>MW</div>
+        <div className={styles.statPages} ref={statPagesRef} onScroll={onStatScroll}>
+          {statPages.map((page, p) => (
+            <div key={p} className={styles.statPage}>
+              {page.map((s) => (
+                <div key={s.label} className={clsx(styles.card, styles.statCard)}>
+                  <div className={styles.statLabel}>{s.label}</div>
+                  <div className={styles.statValue}>{s.value}</div>
+                  <div className={styles.statUnits}>{s.units}</div>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Renewables</div>
-          <div className={styles.statValue}>
-            {fmt(
-              (lastVal(data.windAvg) ?? 0) +
-                (lastVal(data.pvAvg) ?? 0) +
-                (lastVal(data.cspAvg) ?? 0) +
-                (lastVal(data.otherReAvg) ?? 0),
-            )}
-          </div>
-          <div className={styles.statUnits}>MW</div>
-        </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Total Generation</div>
-          <div className={styles.statValue}>{fmt(data.latestGen)}</div>
-          <div className={styles.statUnits}>MW</div>
-        </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Planned (PCLF)</div>
-          <div className={styles.statValue}>{fmt1(lastVal(data.pclfAvg))}%</div>
-          <div className={styles.statUnits}>of fleet</div>
-        </div>
-
-        {/* Row 2: col2..col5 */}
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Nuclear</div>
-          <div className={styles.statValue}>{fmt(lastVal(data.nuclearAvg))}</div>
-          <div className={styles.statUnits}>MW</div>
-        </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>OCGT</div>
-          <div className={styles.statValue}>
-            {fmt((lastVal(data.ocgtEskomMax) ?? 0) + (lastVal(data.ocgtIppMax) ?? 0))}
-          </div>
-          <div className={styles.statUnits}>MW · peak</div>
-        </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Total Demand</div>
-          <div className={styles.statValue}>{fmt(data.latestDemand)}</div>
-          <div className={styles.statUnits}>MW</div>
-        </div>
-        <div className={clsx(styles.card, styles.statCard)}>
-          <div className={styles.statLabel}>Unplanned (UCLF)</div>
-          <div className={styles.statValue}>{fmt1(lastVal(data.uclfAvg))}%</div>
-          <div className={styles.statUnits}>of fleet</div>
-        </div>
+      </div>
+      <div className={styles.dots}>
+        {statPages.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            className={clsx(styles.dot, i === statPage && styles.dotActive)}
+            aria-label={`Stats page ${i + 1}`}
+            onClick={() => scrollToStatPage(i)}
+          />
+        ))}
       </div>
       <div className={styles.asOf}>
         All values are the most recent day&rsquo;s average
@@ -645,13 +895,39 @@ export default function Dashboard(): ReactNode {
       </div>
 
       <div className={styles.chartPair}>
-        <ChartCard title="Outage Breakdown" option={charts.outageStack} />
-        <ChartCard title="Weekly EAF (this year vs last)" option={charts.eafYoy} />
+        <ChartCard title="Weekly EAF by year" option={charts.eafYoy} />
+        <ChartCard title="Outages: planned / unplanned / other (7-day avg %)" option={charts.outagesYoy} />
       </div>
+      <div className={styles.chartPair}>
+        <ChartCard title="Station build-up — hourly generation mix (last 3 months)" option={charts.stationHourly} />
+        <ChartCard title="EAF &amp; outages — hourly (last 3 months)" option={charts.eafOutageHourly} />
+      </div>
+
+      <h2 className={styles.sectionTitle}>Generation</h2>
       <div className={styles.chartPair}>
         <ChartCard title="Coal (min / avg / max)" option={charts.thermal} />
         <ChartCard title="Nuclear (hourly avg)" option={charts.nuclear} />
       </div>
+      <div className={styles.chartGrid}>
+        <ChartCard title="Renewables (hourly avg)" option={charts.renewables} />
+        <ChartCard
+          title="Generation, Demand & Available Capacity (daily avg, peak demand dashed)"
+          option={charts.genDemand}
+        />
+      </div>
+      <div className={styles.chartPair}>
+        <ChartCard title="Available capacity by year (weekly avg)" option={charts.capacityYoy} />
+        <ChartCard title="Peak demand by year (weekly peak)" option={charts.peakDemandYoy} />
+      </div>
+      <div className={styles.chartPair}>
+        <ChartCard title="Monthly generation by year (avg MW)" option={charts.genYoy} />
+        <ChartCard title="Monthly demand by year (avg MW)" option={charts.demandYoy} />
+      </div>
+      <div className={styles.chartGrid}>
+        <ChartCard title="International Trade" option={charts.trade} />
+      </div>
+
+      <h2 className={styles.sectionTitle}>Peaking generation</h2>
       <div className={styles.chartGrid}>
         <ChartCard
           title="OCGT (Eskom + IPP peak, combined daily average)"
@@ -661,15 +937,29 @@ export default function Dashboard(): ReactNode {
           title="OCGT hourly (Eskom + IPP, last 1 year in slider, default last 14 days)"
           option={charts.ocgtHourly}
         />
-        <ChartCard
-          title="Generation, Demand & Available Capacity (daily avg, peak demand dashed)"
-          option={charts.genDemand}
-        />
-        <ChartCard title="Renewables (hourly avg)" option={charts.renewables} />
+        <ChartCard title="Pumped storage (daily avg generation)" option={charts.pumpedStorage} />
+      </div>
+
+      <h2 className={styles.sectionTitle}>Outages</h2>
+      <div className={styles.chartGrid}>
+        <ChartCard title="Capability loss factors (MW)" option={charts.clf} />
+        <ChartCard title="UCLF + OCLF (year over year)" option={charts.uclfOclfYoy} />
+      </div>
+
+      <h2 className={styles.sectionTitle}>Demand reduction</h2>
+      <div className={styles.chartPair}>
+        <ChartCard title="Total load reduction (daily avg)" option={charts.totalReductionChart} />
+        <ChartCard title="IOS — excl. ILS & MLR (daily avg)" option={charts.iosChart} />
+      </div>
+      <div className={styles.chartPair}>
+        <ChartCard title="MLR — manual load reduction (daily avg)" option={charts.mlrChart} />
+        <ChartCard title="ILS — interruptible load (daily avg)" option={charts.ilsChart} />
+      </div>
+
+      <h2 className={styles.sectionTitle}>Solar</h2>
+      <div className={styles.chartPair}>
         <ChartCard title="Rooftop PV (installed MW by province)" option={charts.rooftopPv} />
         <ChartCard title="Rooftop PV (W per household)" option={charts.rooftopPvPerHh} />
-        <ChartCard title="UCLF + OCLF (year over year)" option={charts.uclfOclfYoy} />
-        <ChartCard title="International Trade" option={charts.trade} />
       </div>
 
       <details className={clsx(styles.card, styles.provenance)}>

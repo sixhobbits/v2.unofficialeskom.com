@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.rooftop_pv_monthly
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

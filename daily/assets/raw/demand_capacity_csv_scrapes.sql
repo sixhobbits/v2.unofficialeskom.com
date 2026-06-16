@@ -1,5 +1,7 @@
 /* @bruin
 name: raw.demand_capacity_csv_scrapes
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

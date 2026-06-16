@@ -14,7 +14,7 @@ import re
 import urllib.parse
 from typing import Any
 
-from eskom_portal.fetch import get
+from eskom_portal.fetch import get, get_meta
 
 
 # ---------- HTML link extraction ----------
@@ -99,6 +99,13 @@ def _parse_axis(value: Any) -> dt.datetime | None:
             return dt.datetime.strptime(embedded.group(0), "%Y-%m-%d")
         except ValueError:
             pass
+    # Month-granularity period labels with no day component: a bare YYYYMM
+    # (e.g. 202603 = Mar 2026) or a range string that embeds them (e.g.
+    # "202504 / 202604"). Use the first month found, anchored to day 1 —
+    # callers MAX over the rows, so this surfaces how far the dataset runs.
+    period = re.search(r"(20\d{2})(0[1-9]|1[0-2])", text)
+    if period:
+        return dt.datetime(int(period.group(1)), int(period.group(2)), 1)
     return None
 
 
@@ -115,6 +122,78 @@ def _choose_axis_column(headers: list[str]) -> str | None:
     return headers[0]
 
 
+# ---------- text → rows ----------
+
+def parse_csv_text(text: str) -> list[dict[str, Any]]:
+    """Decode a CSV body into [{timestamp, series, value}] rows.
+
+    Pure function over already-fetched text — shared by scrape_csv (live) and
+    the replay parsers that decode stored content. Returns [] for empty / HTML
+    (error-page) bodies. The first date-ish header is the axis; every other
+    numeric column becomes a series.
+    """
+    if not text or _looks_like_html(text):
+        return []
+    delimiter = _sniff_delimiter(text)
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    headers = [h.strip() for h in (reader.fieldnames or []) if h is not None]
+    axis_col = _choose_axis_column(headers)
+    rows: list[dict[str, Any]] = []
+    for raw_row in reader:
+        ts = _parse_axis(raw_row.get(axis_col)) if axis_col else None
+        for h in headers:
+            if h == axis_col:
+                continue
+            v = _parse_number(raw_row.get(h), delimiter)
+            if v is None:
+                continue
+            rows.append({"timestamp": ts, "series": h, "value": v})
+    return rows
+
+
+# Slug whose CSV needs the fiscal-year parser below.
+OCGT_FY_SLUG = "ocgt-usage/total-monthly-ocgt-eskom-ipp-and-gt-energy-utilization"
+
+
+def parse_ocgt_fy_csv(text: str) -> list[dict[str, Any]]:
+    """Special-case parser for the "Total monthly OCGT (Eskom+IPP)" fiscal-year
+    chart, whose CSV the generic parser mis-dates.
+
+    Each row pairs two YYYYMM tokens in FIN_YEARS_DESCR — the same calendar month
+    in two financial years, e.g. "202504 / 202604" (Apr in FY2025-26 and FY2026-27)
+    — with a Legend_Descr naming which financial year the value is for ("2025-26
+    Total…" / "2026-27 Total…"). The real calendar month is the token whose YEAR
+    matches the legend's leading year, so the later FY's data (e.g. May/Jun 2026)
+    isn't mis-stamped a year early. Zero values are future-month placeholders and
+    are skipped. The series name is the legend, so each FY plots separately.
+    """
+    if not text or _looks_like_html(text):
+        return []
+    delimiter = _sniff_delimiter(text)
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    rows: list[dict[str, Any]] = []
+    for raw_row in reader:
+        desc = (raw_row.get("FIN_YEARS_DESCR") or "").strip()
+        legend = (raw_row.get("Legend_Descr") or "").strip()
+        value = _parse_number(raw_row.get("ESKOM_OCGT_IPP"), delimiter)
+        if value is None or value == 0:
+            continue
+        tokens = re.findall(r"(20\d{2})(0[1-9]|1[0-2])", desc)
+        if not tokens:
+            continue
+        legend_year = re.match(r"(\d{4})", legend)
+        ly = int(legend_year.group(1)) if legend_year else None
+        chosen = next(((int(y), int(m)) for y, m in tokens if ly and int(y) == ly), None)
+        if chosen is None:
+            chosen = (int(tokens[0][0]), int(tokens[0][1]))
+        rows.append({
+            "timestamp": dt.datetime(chosen[0], chosen[1], 1),
+            "series": legend or "OCGT (Eskom+IPP)",
+            "value": value,
+        })
+    return rows
+
+
 # ---------- main entry point ----------
 
 def scrape_csv(page_url: str) -> dict[str, Any]:
@@ -126,6 +205,9 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
         "page_url": str,
         "csv_url": str | None,
         "http_status": int,
+        "etag": str | None,            # CSV response validators, for cheap change
+        "last_modified": str | None,   # detection / republish-cadence analysis
+        "content_length": str | None,
         "content_text": str | None,   # the raw CSV (or error HTML), preserved for replay
         "error": str | None,
         "rows": list[{"timestamp": datetime|None, "series": str, "value": float}],
@@ -137,6 +219,9 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
         "page_url": page_url,
         "csv_url": None,
         "http_status": 0,
+        "etag": None,
+        "last_modified": None,
+        "content_length": None,
         "content_text": None,
         "error": None,
         "rows": [],
@@ -157,8 +242,11 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
     csv_url = links[0]
     result["csv_url"] = csv_url
 
-    raw, _f, http_status = get(csv_url)
+    raw, _f, http_status, hdrs = get_meta(csv_url)
     result["http_status"] = http_status
+    result["etag"] = hdrs.get("etag")
+    result["last_modified"] = hdrs.get("last-modified")
+    result["content_length"] = hdrs.get("content-length")
     text = _decode(raw)
     result["content_text"] = text[:5_000_000]  # cap for very large CSVs
 
@@ -169,21 +257,5 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
         result["error"] = "CSV link returned HTML"
         return result
 
-    # parse
-    delimiter = _sniff_delimiter(text)
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    headers = [h.strip() for h in (reader.fieldnames or []) if h is not None]
-    axis_col = _choose_axis_column(headers)
-
-    rows: list[dict[str, Any]] = []
-    for raw_row in reader:
-        ts = _parse_axis(raw_row.get(axis_col)) if axis_col else None
-        for h in headers:
-            if h == axis_col:
-                continue
-            v = _parse_number(raw_row.get(h), delimiter)
-            if v is None:
-                continue
-            rows.append({"timestamp": ts, "series": h, "value": v})
-    result["rows"] = rows
+    result["rows"] = parse_csv_text(text)
     return result

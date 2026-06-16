@@ -9,7 +9,7 @@ description: |
 
 materialization:
     type: table
-    strategy: create+replace
+    strategy: merge
 
 depends:
     - raw.news_fetch

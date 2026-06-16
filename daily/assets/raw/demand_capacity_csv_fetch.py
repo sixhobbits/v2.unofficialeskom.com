@@ -1,5 +1,7 @@
 """ @bruin
 name: raw.demand_capacity_csv_fetch
+tags:
+    - hourly
 connection: eskom_warehouse
 materialization:
     type: table

@@ -54,13 +54,14 @@ type SeriesItem = {
 
 export function timeSeriesOption(
   series: SeriesItem[],
-  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean; isMobile?: boolean} = {},
+  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean; monthly?: boolean; isMobile?: boolean} = {},
   P: Palette,
 ) {
   const unit = opts.unit ?? 'MW';
   const decimals = opts.decimals ?? 0;
   const yAxis = opts.yAxis;
   const hourly = !!opts.hourly;
+  const monthly = !!opts.monthly;
   const isMobile = !!opts.isMobile;
   const fmtTooltip = (params: any[]) => {
     if (!params || !params.length) return '';
@@ -81,18 +82,19 @@ export function timeSeriesOption(
     });
     const ts = params[0].value && params[0].value[0];
     const d = ts != null ? new Date(ts) : null;
-    const header = d
-      ? d.getUTCFullYear() +
+    const ymd =
+      d &&
+      d.getUTCFullYear() +
         '-' +
         String(d.getUTCMonth() + 1).padStart(2, '0') +
-        '-' +
-        String(d.getUTCDate()).padStart(2, '0') +
-        (hourly
-          ? ' ' +
-            String(d.getUTCHours()).padStart(2, '0') +
-            ':00 UTC'
-          : '')
-      : params[0].axisValueLabel;
+        // Monthly points represent the whole month — drop the day to avoid
+        // implying it's the 1st.
+        (monthly
+          ? ''
+          : '-' +
+            String(d.getUTCDate()).padStart(2, '0') +
+            (hourly ? ' ' + String(d.getUTCHours()).padStart(2, '0') + ':00 UTC' : ''));
+    const header = d ? ymd : params[0].axisValueLabel;
     return (
       '<div style="font-weight:600;margin-bottom:4px">' +
       header +
@@ -104,6 +106,7 @@ export function timeSeriesOption(
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
+      confine: true,
       backgroundColor: P.tooltipBg,
       borderColor: P.tooltipBorder,
       borderWidth: 1,
@@ -123,14 +126,29 @@ export function timeSeriesOption(
       itemGap: 18,
       textStyle: {fontSize: 11, color: P.legend},
     },
-    grid: {top: 50, right: yAxis ? 64 : 18, bottom: isMobile ? 90 : 70, left: 56},
+    grid: {top: 50, right: 18, bottom: isMobile ? 90 : 70, left: 56},
     xAxis: {
       type: 'time',
+      // ECharts' default time axis uses a two-tier label scheme that forces an
+      // extra tick on the 1st of each month, crowding ticks near boundaries
+      // (29 → May → 6) and landing on odd days. Supplying an explicit formatter
+      // switches it to plain, evenly-spaced interval ticks; minInterval ≥1 week
+      // keeps day-level ticks from bunching, and the formatter labels the month
+      // (or year, near January) on the first tick of each month, days otherwise.
+      minInterval: 7 * 24 * 3600 * 1000,
       axisLabel: {
         fontSize: 10,
         color: P.axisLabel,
         hideOverlap: true,
         margin: 10,
+        formatter: (value: number) => {
+          const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const d = new Date(value); // local time, matching ECharts' tick placement
+          const day = d.getDate();
+          const mon = d.getMonth();
+          if (day <= 7) return mon === 0 ? String(d.getFullYear()) : M[mon];
+          return String(day);
+        },
       },
       axisLine: {lineStyle: {color: P.axisLine}},
       axisTick: {show: false},
@@ -152,6 +170,11 @@ export function timeSeriesOption(
         type: 'slider',
         start: 75,
         end: 100,
+        // The slider always spans the full history, so on a phone one pixel of
+        // handle travel is ~a week — a small window is impossible to grab.
+        // Don't let the handles collapse past a day; fine selection comes from
+        // the range preset buttons instead.
+        minValueSpan: 24 * 3600 * 1000,
         bottom: isMobile ? 14 : 8,
         height: isMobile ? 44 : 30,
         throttle: 0,
@@ -167,38 +190,10 @@ export function timeSeriesOption(
         textStyle: {color: P.dzText, fontSize: isMobile ? 12 : 11},
         brushSelect: false,
       },
+      // No 'inside' zoom on purpose: it captures touch/scroll gestures per
+      // graph, which makes scrolling the page past a chart infuriating. Fine
+      // ranges come from the preset buttons + the slider's day-level minimum.
     ],
     series,
-  };
-}
-
-export function eafGaugeOption(value: number | null, P: Palette) {
-  return {
-    backgroundColor: 'transparent',
-    series: [
-      {
-        type: 'gauge',
-        progress: {show: true, width: 18},
-        axisLine: {lineStyle: {width: 18}},
-        axisTick: {show: false},
-        splitLine: {length: 15, lineStyle: {width: 2, color: '#999'}},
-        axisLabel: {distance: 25, color: '#999', fontSize: 12},
-        anchor: {
-          show: true,
-          showAbove: true,
-          size: 25,
-          itemStyle: {borderWidth: 10},
-        },
-        title: {show: false},
-        detail: {
-          valueAnimation: true,
-          fontSize: 36,
-          offsetCenter: [0, '70%'],
-          color: P.tooltipText,
-          formatter: (v: number) => String(Math.round(v)),
-        },
-        data: [{value: value ?? 0}],
-      },
-    ],
   };
 }

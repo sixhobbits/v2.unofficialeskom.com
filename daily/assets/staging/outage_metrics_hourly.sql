@@ -1,5 +1,7 @@
 /* @bruin
 name: staging.outage_metrics_hourly
+tags:
+    - hourly
 type: duckdb.sql
 
 description: |

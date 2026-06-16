@@ -60,16 +60,17 @@ const config: Config = {
             'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
         },
         blog: {
+          // Route kept as /updates (published post URLs); the tab is "Analysis".
+          routeBasePath: 'updates',
+          blogTitle: 'Analysis',
+          blogDescription: 'Monthly analysis of the unofficial Eskom data',
+          blogSidebarTitle: 'All posts',
+          blogSidebarCount: 'ALL',
           showReadingTime: true,
           feedOptions: {
             type: ['rss', 'atom'],
             xslt: true,
           },
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
-          // Useful options to enforce blogging best practices
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',
           onUntruncatedBlogPosts: 'warn',
@@ -83,7 +84,7 @@ const config: Config = {
 
   themeConfig: {
     // Replace with your project's social card
-    image: 'img/docusaurus-social-card.jpg',
+    image: 'img/og-card.jpg',
     colorMode: {
       respectPrefersColorScheme: false,
     },
@@ -95,11 +96,26 @@ const config: Config = {
       },
       items: [
         {to: '/', label: 'Home', position: 'left'},
+        {to: '/status', label: 'Status', position: 'left'},
         {to: '/dashboard', label: 'Dashboard', position: 'left'},
+        {to: '/monthly', label: 'Long term', position: 'left'},
+        {to: '/heatmap', label: 'Heatmap', position: 'left'},
+        {to: '/financials', label: 'Financials', position: 'left'},
+        {to: '/updates', label: 'Analysis', position: 'left'},
+        {to: '/eskom-source-data', label: 'Source data', position: 'left'},
       ],
     },
     footer: {
       style: 'dark',
+      links: [
+        {
+          items: [
+            {label: 'GitHub', href: 'https://github.com/sixhobbits/v2.unofficialeskom.com'},
+            {label: 'Bluesky', href: 'https://bsky.app/profile/sixhobbits.bsky.social'},
+            {label: 'Source data', to: '/eskom-source-data'},
+          ],
+        },
+      ],
       copyright: `Copyright © ${new Date().getFullYear()} <a href="https://dwyer.co.za" target="_blank" rel="noopener noreferrer">Gareth Dwyer</a>. Not endorsed by or affiliated with Eskom.`,
     },
     prism: {

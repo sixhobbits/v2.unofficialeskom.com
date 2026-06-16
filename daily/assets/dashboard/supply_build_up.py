@@ -1,5 +1,7 @@
 """ @bruin
 name: dashboard.supply_build_up
+tags:
+    - hourly
 depends:
     - staging.supply_build_up
 

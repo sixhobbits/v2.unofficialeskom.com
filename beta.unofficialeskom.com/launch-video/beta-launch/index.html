@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --bg-soft: #131c30;
+        --fg: #f4f7fb;
+        --fg-dim: #9aa7c2;
+        --accent: #4f9cf9;
+        --accent-warm: #ffb800;
+        --old: #d96f6f;
+        --new: #4ad29a;
+        --line: rgba(255, 255, 255, 0.08);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: "Inter", sans-serif;
+        font-feature-settings: "ss01", "cv11", "tnum";
+      }
+
+      /* ---------- shared scene plumbing ---------- */
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        background: var(--bg);
+        overflow: hidden;
+      }
+      .scene-content {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        padding: 80px 120px;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+      }
+
+      /* ambient backdrop glow shared across scenes */
+      .glow {
+        position: absolute;
+        pointer-events: none;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.55;
+      }
+      /* mark glows as decorative (intentionally bleed past scene edges) */
+      .glow, .grid { /* set via data-layout-ignore on elements */ }
+      .glow.a {
+        width: 900px; height: 900px;
+        left: -200px; top: -200px;
+        background: radial-gradient(circle, rgba(79,156,249,0.55), rgba(79,156,249,0));
+      }
+      .glow.b {
+        width: 700px; height: 700px;
+        right: -150px; bottom: -200px;
+        background: radial-gradient(circle, rgba(255,184,0,0.35), rgba(255,184,0,0));
+      }
+
+      /* faint grid */
+      .grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+        background-size: 80px 80px;
+        opacity: 0.4;
+        pointer-events: none;
+      }
+
+      /* small ⚡ logo mark */
+      .mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        font-weight: 600;
+        font-size: 26px;
+        letter-spacing: 0.04em;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+      }
+      .mark .bolt {
+        width: 36px; height: 36px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #0b1220;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 900;
+        font-size: 22px;
+        box-shadow: 0 0 30px rgba(79,156,249,0.6);
+      }
+
+      /* ---------- scene 1 — title ---------- */
+      #s1 .stack {
+        margin: auto 0;
+        max-width: 1500px;
+      }
+      #s1 .pre {
+        font-size: 28px;
+        font-weight: 500;
+        letter-spacing: 0.3em;
+        color: var(--accent);
+        text-transform: uppercase;
+        margin-bottom: 28px;
+      }
+      #s1 h1 {
+        font-family: "Playfair Display", serif;
+        font-size: 220px;
+        line-height: 0.95;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        color: var(--fg);
+      }
+      #s1 h1 .em {
+        color: var(--accent);
+        font-style: italic;
+      }
+      #s1 .sub {
+        margin-top: 40px;
+        font-size: 40px;
+        font-weight: 400;
+        color: var(--fg-dim);
+        max-width: 1200px;
+        line-height: 1.4;
+      }
+      #s1 .urlpill {
+        margin-top: 60px;
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        padding: 18px 28px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.02);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 28px;
+        color: var(--fg);
+        align-self: flex-start;
+      }
+      #s1 .urlpill .dot {
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        background: var(--new);
+        box-shadow: 0 0 16px var(--new);
+      }
+
+      /* ---------- shared: browser chrome wrapper for screenshots ---------- */
+      .browser {
+        background: #1b2538;
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow:
+          0 30px 80px rgba(0,0,0,0.5),
+          0 0 0 1px rgba(255,255,255,0.05);
+      }
+      .browser .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        background: #131c30;
+      }
+      .browser .bar .light {
+        width: 14px; height: 14px;
+        border-radius: 50%;
+        background: #3a455e;
+      }
+      .browser .bar .url {
+        margin-left: 18px;
+        padding: 6px 16px;
+        background: #0b1220;
+        border-radius: 8px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 18px;
+        color: var(--fg-dim);
+      }
+      .browser .viewport {
+        background: #ffffff;
+        overflow: hidden;
+        position: relative;
+      }
+      .browser .viewport img {
+        display: block;
+        width: 100%;
+      }
+
+      /* ---------- scene 2 — before ---------- */
+      #s2 .scene-content { padding: 60px 80px; flex-direction: row; gap: 60px; }
+      #s2 .left {
+        flex: 0 0 580px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      #s2 .label {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: var(--old);
+        margin-bottom: 26px;
+      }
+      #s2 .left h2 {
+        font-size: 110px;
+        font-weight: 800;
+        line-height: 1;
+        margin-bottom: 24px;
+        letter-spacing: -0.02em;
+      }
+      #s2 .left p {
+        font-size: 30px;
+        line-height: 1.45;
+        color: var(--fg-dim);
+        margin-bottom: 40px;
+      }
+      .gripes {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      .gripe {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        font-size: 28px;
+        color: var(--fg);
+      }
+      .gripe .ic {
+        width: 44px; height: 44px;
+        border-radius: 10px;
+        background: rgba(217,111,111,0.15);
+        color: var(--old);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 700;
+        flex: 0 0 44px;
+      }
+      #s2 .browser {
+        flex: 1;
+        align-self: center;
+        max-height: 880px;
+      }
+      #s2 .browser .viewport { height: 780px; }
+
+      /* ---------- scene 3 — after ---------- */
+      #s3 .scene-content { padding: 60px 80px; flex-direction: row; gap: 60px; }
+      #s3 .right {
+        flex: 0 0 580px;
+        order: 2;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      #s3 .label {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: var(--new);
+        margin-bottom: 26px;
+      }
+      #s3 .right h2 {
+        font-size: 110px;
+        font-weight: 800;
+        line-height: 1;
+        margin-bottom: 24px;
+        letter-spacing: -0.02em;
+      }
+      #s3 .right p {
+        font-size: 30px;
+        line-height: 1.45;
+        color: var(--fg-dim);
+        margin-bottom: 40px;
+      }
+      .perks {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      .perk {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        font-size: 28px;
+        color: var(--fg);
+      }
+      .perk .ic {
+        width: 44px; height: 44px;
+        border-radius: 10px;
+        background: rgba(74,210,154,0.15);
+        color: var(--new);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 700;
+        flex: 0 0 44px;
+      }
+      #s3 .browser {
+        flex: 1;
+        align-self: center;
+        max-height: 880px;
+        order: 1;
+      }
+      #s3 .browser .viewport {
+        height: 780px;
+      }
+      #s3 .browser .viewport img {
+        width: 100%;
+        will-change: transform;
+      }
+
+      /* ---------- scene 4 — mobile ---------- */
+      #s4 .scene-content {
+        padding: 60px 120px;
+        flex-direction: column;
+        gap: 30px;
+      }
+      #s4 .top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+      }
+      #s4 .top h2 {
+        font-size: 80px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      #s4 .top h2 .em { color: var(--accent); font-style: italic; font-family: "Playfair Display", serif; }
+      #s4 .top .hint {
+        font-size: 24px;
+        color: var(--fg-dim);
+      }
+      #s4 .phones {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 120px;
+      }
+      .phone {
+        width: 340px;
+        height: 720px;
+        background: #1b2538;
+        border-radius: 38px;
+        padding: 14px;
+        box-shadow:
+          0 30px 80px rgba(0,0,0,0.55),
+          0 0 0 1px rgba(255,255,255,0.06);
+        position: relative;
+      }
+      .phone .screen {
+        width: 100%;
+        height: 100%;
+        background: #ffffff;
+        border-radius: 26px;
+        overflow: hidden;
+        position: relative;
+      }
+      .phone .screen img {
+        display: block;
+        width: 100%;
+        will-change: transform;
+      }
+      .phone .tag {
+        position: absolute;
+        bottom: -56px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .phone.old .tag { color: var(--old); }
+      .phone.new .tag { color: var(--new); }
+      .phone.old .screen { background: #f3f4f6; }
+
+      /* ---------- scene 5 — CTA ---------- */
+      #s5 .scene-content { padding: 80px 120px; justify-content: center; align-items: center; text-align: center; }
+      #s5 .kicker {
+        font-size: 28px;
+        letter-spacing: 0.4em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 36px;
+      }
+      #s5 h2 {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 92px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--fg);
+        line-height: 1;
+        white-space: nowrap;
+      }
+      #s5 h2 .scheme { color: var(--fg-dim); font-weight: 400; }
+      #s5 h2 .em { color: var(--accent); }
+      #s5 .sub {
+        margin-top: 56px;
+        font-size: 36px;
+        color: var(--fg-dim);
+        max-width: 1300px;
+        line-height: 1.4;
+      }
+      #s5 .meta {
+        margin-top: 60px;
+        display: flex;
+        gap: 40px;
+        color: var(--fg-dim);
+        font-size: 24px;
+      }
+      #s5 .meta .dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--new);
+        margin-right: 12px;
+        box-shadow: 0 0 12px var(--new);
+        vertical-align: middle;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="24"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- Scene 1 — title -->
+      <div id="s1" class="scene clip"
+           data-start="0" data-duration="3.4" data-track-index="0">
+        <div class="glow a" data-layout-ignore></div>
+        <div class="glow b" data-layout-ignore></div>
+        <div class="grid" data-layout-ignore></div>
+        <div class="scene-content">
+          <div class="mark"><span class="bolt">⚡</span>Unofficial Eskom</div>
+          <div class="stack">
+            <div class="pre">South Africa · electricity data</div>
+            <h1>A new <span class="em">home</span><br/>for the data.</h1>
+            <div class="sub">Independent dashboards over Eskom's published numbers — rebuilt from the ground up.</div>
+            <div class="urlpill"><span class="dot"></span>beta.unofficialeskom.com&nbsp;&nbsp;·&nbsp;&nbsp;live now</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene 2 — before -->
+      <div id="s2" class="scene clip"
+           data-start="3.2" data-duration="5.2" data-track-index="1">
+        <div class="glow a" data-layout-ignore style="background: radial-gradient(circle, rgba(217,111,111,0.35), rgba(217,111,111,0));"></div>
+        <div class="grid" data-layout-ignore></div>
+        <div class="scene-content">
+          <div class="left">
+            <div class="label">Before</div>
+            <h2>Metabase, in an iframe.</h2>
+            <p>The old site was a wall of embedded Metabase dashboards — slow, awkward on phones, and unreadable at a glance.</p>
+            <div class="gripes">
+              <div class="gripe"><span class="ic">i</span>Dashboards-in-an-iframe</div>
+              <div class="gripe"><span class="ic">⌛</span>Slow first paint</div>
+              <div class="gripe"><span class="ic">📵</span>Broken on mobile</div>
+            </div>
+          </div>
+          <div class="browser">
+            <div class="bar">
+              <div class="light"></div><div class="light"></div><div class="light"></div>
+              <div class="url">unofficialeskom.com / dashboards</div>
+            </div>
+            <div class="viewport">
+              <img src="assets/metabase-desktop.png" alt="metabase dashboard" data-layout-allow-overflow/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene 3 — after -->
+      <div id="s3" class="scene clip"
+           data-start="8.2" data-duration="7.2" data-track-index="2">
+        <div class="glow a" data-layout-ignore style="background: radial-gradient(circle, rgba(79,156,249,0.5), rgba(79,156,249,0));"></div>
+        <div class="glow b" data-layout-ignore style="background: radial-gradient(circle, rgba(74,210,154,0.3), rgba(74,210,154,0));"></div>
+        <div class="grid" data-layout-ignore></div>
+        <div class="scene-content">
+          <div class="right">
+            <div class="label">Now</div>
+            <h2>Native charts.<br/>One page.</h2>
+            <p>The whole grid, rendered with ECharts — pan, zoom, hover. Loads instantly, refreshes hourly.</p>
+            <div class="perks">
+              <div class="perk"><span class="ic">⚡</span>Instant page load</div>
+              <div class="perk"><span class="ic">📈</span>Full ECharts interactivity</div>
+              <div class="perk"><span class="ic">⟳</span>Refreshed hourly from the portal</div>
+            </div>
+          </div>
+          <div class="browser">
+            <div class="bar">
+              <div class="light"></div><div class="light"></div><div class="light"></div>
+              <div class="url">beta.unofficialeskom.com / dashboard</div>
+            </div>
+            <div class="viewport">
+              <img id="s3-shot" src="assets/beta-desktop.png" alt="beta dashboard" data-layout-allow-overflow/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene 4 — mobile -->
+      <div id="s4" class="scene clip"
+           data-start="15.2" data-duration="5.2" data-track-index="3">
+        <div class="glow a" data-layout-ignore style="left:auto; right:-200px;"></div>
+        <div class="glow b" data-layout-ignore style="right:auto; left:-100px; bottom:auto; top:-100px;"></div>
+        <div class="grid" data-layout-ignore></div>
+        <div class="scene-content">
+          <div class="top">
+            <h2>Built for your <span class="em">phone</span>, too.</h2>
+            <div class="hint">— same data, no pinch-to-zoom</div>
+          </div>
+          <div class="phones">
+            <div class="phone old">
+              <div class="screen">
+                <img id="s4-old" src="assets/metabase-mobile.png" alt="metabase on mobile" data-layout-allow-overflow/>
+              </div>
+              <div class="tag" data-layout-allow-overflow>Before</div>
+            </div>
+            <div class="phone new">
+              <div class="screen">
+                <img id="s4-new" src="assets/beta-mobile.png" alt="beta on mobile" data-layout-allow-overflow/>
+              </div>
+              <div class="tag" data-layout-allow-overflow>Now</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene 5 — CTA -->
+      <div id="s5" class="scene clip"
+           data-start="20.2" data-duration="3.8" data-track-index="4">
+        <div class="glow a" data-layout-ignore></div>
+        <div class="glow b" data-layout-ignore></div>
+        <div class="grid" data-layout-ignore></div>
+        <div class="scene-content">
+          <div class="kicker">live now</div>
+          <h2>
+            <span class="scheme">https://</span><span class="em">beta</span><span class="scheme">.unofficialeskom.com</span>
+          </h2>
+          <div class="sub">A faster, friendlier window into South Africa's electricity supply.</div>
+          <div class="meta">
+            <span><span class="dot"></span>Refreshed hourly</span>
+            <span><span class="dot"></span>Open source</span>
+            <span><span class="dot"></span>Not affiliated with Eskom</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* -------- Scene 1 (0.0 – 3.4) — title -------- */
+      tl.from("#s1 .mark", { opacity: 0, y: -20, duration: 0.5, ease: "power2.out" }, 0.1);
+      tl.from("#s1 .pre", { opacity: 0, y: 24, duration: 0.5, ease: "power2.out" }, 0.4);
+      tl.from("#s1 h1", { opacity: 0, y: 60, duration: 0.9, ease: "expo.out" }, 0.6);
+      tl.from("#s1 .sub", { opacity: 0, y: 24, duration: 0.6, ease: "power3.out" }, 1.0);
+      tl.from("#s1 .urlpill", { opacity: 0, y: 20, scale: 0.96, duration: 0.5, ease: "back.out(1.3)" }, 1.4);
+      tl.from("#s1 .urlpill .dot", { scale: 0, duration: 0.4, ease: "back.out(2)" }, 1.6);
+      /* ambient drift on glow */
+      tl.to("#s1 .glow.a", { x: 60, duration: 3.4, ease: "sine.inOut" }, 0);
+      tl.to("#s1 .glow.b", { x: -60, duration: 3.4, ease: "sine.inOut" }, 0);
+      /* crossfade out into scene 2 (last 0.2s) */
+      tl.to("#s1", { opacity: 0, duration: 0.25, ease: "power1.inOut" }, 3.15);
+
+      /* -------- Scene 2 (3.2 – 8.4) — before -------- */
+      tl.set("#s2", { opacity: 0 }, 3.2);
+      tl.to("#s2", { opacity: 1, duration: 0.35, ease: "power1.inOut" }, 3.2);
+      tl.from("#s2 .label", { opacity: 0, x: -30, duration: 0.45, ease: "power2.out" }, 3.45);
+      tl.from("#s2 .left h2", { opacity: 0, y: 40, duration: 0.6, ease: "power3.out" }, 3.6);
+      tl.from("#s2 .left p", { opacity: 0, y: 24, duration: 0.5, ease: "power2.out" }, 3.95);
+      tl.from("#s2 .gripe", { opacity: 0, x: -28, duration: 0.45, stagger: 0.13, ease: "power2.out" }, 4.3);
+      tl.from("#s2 .browser", { opacity: 0, x: 60, scale: 0.97, duration: 0.8, ease: "expo.out" }, 3.5);
+      /* faint zoom on the cluttered metabase shot to add life */
+      tl.fromTo("#s2 .browser .viewport img",
+        { scale: 1.0, y: 0 },
+        { scale: 1.04, y: -40, duration: 5.2, ease: "sine.inOut" }, 3.2);
+      /* crossfade out */
+      tl.to("#s2", { opacity: 0, duration: 0.3, ease: "power1.inOut" }, 8.1);
+
+      /* -------- Scene 3 (8.2 – 15.4) — after -------- */
+      tl.set("#s3", { opacity: 0 }, 8.2);
+      tl.to("#s3", { opacity: 1, duration: 0.4, ease: "power1.inOut" }, 8.2);
+      tl.from("#s3 .label", { opacity: 0, x: 30, duration: 0.45, ease: "power2.out" }, 8.5);
+      tl.from("#s3 .right h2", { opacity: 0, y: 40, duration: 0.6, ease: "power3.out" }, 8.65);
+      tl.from("#s3 .right p", { opacity: 0, y: 24, duration: 0.5, ease: "power2.out" }, 9.0);
+      tl.from("#s3 .perk", { opacity: 0, x: 28, duration: 0.45, stagger: 0.13, ease: "power2.out" }, 9.35);
+      tl.from("#s3 .browser", { opacity: 0, x: -60, scale: 0.97, duration: 0.8, ease: "expo.out" }, 8.5);
+      /* long parallax scroll down the tall beta screenshot — image is 1440×5299, viewport ~780px tall.
+         The img inside the viewport renders at 100% width. With the viewport being ~960px wide, the
+         image renders at ~3532px tall, so we can translate up to ~ -2700px before bottoming out. */
+      tl.fromTo("#s3-shot",
+        { y: 0 },
+        { y: -2200, duration: 6.6, ease: "sine.inOut" }, 8.5);
+      tl.to("#s3", { opacity: 0, duration: 0.3, ease: "power1.inOut" }, 15.1);
+
+      /* -------- Scene 4 (15.2 – 20.4) — mobile -------- */
+      tl.set("#s4", { opacity: 0 }, 15.2);
+      tl.to("#s4", { opacity: 1, duration: 0.35, ease: "power1.inOut" }, 15.2);
+      tl.from("#s4 .top h2", { opacity: 0, y: 30, duration: 0.6, ease: "power3.out" }, 15.5);
+      tl.from("#s4 .top .hint", { opacity: 0, x: 30, duration: 0.5, ease: "power2.out" }, 15.8);
+      tl.from("#s4 .phone.old", { opacity: 0, x: -100, rotation: -4, duration: 0.7, ease: "expo.out" }, 15.7);
+      tl.from("#s4 .phone.new", { opacity: 0, x: 100, rotation: 4, duration: 0.7, ease: "expo.out" }, 15.95);
+      tl.from("#s4 .phone .tag", { opacity: 0, y: 20, duration: 0.5, stagger: 0.15, ease: "power2.out" }, 16.6);
+      /* phone-screen scroll: both screens 312px wide rendered area. old image is 390x1200, scaled to
+         312 it becomes ~960 tall; screen is 692 tall, so translate up to -260px is safe.
+         new image is 554x5323, scaled to 312 -> ~3000 tall, so translate up to -2300px safely. */
+      tl.fromTo("#s4-old", { y: 0 }, { y: -260, duration: 4.5, ease: "sine.inOut" }, 16.0);
+      tl.fromTo("#s4-new", { y: 0 }, { y: -2200, duration: 4.5, ease: "sine.inOut" }, 16.0);
+      tl.to("#s4", { opacity: 0, duration: 0.3, ease: "power1.inOut" }, 20.1);
+
+      /* -------- Scene 5 (20.2 – 24.0) — CTA -------- */
+      tl.set("#s5", { opacity: 0 }, 20.2);
+      tl.to("#s5", { opacity: 1, duration: 0.4, ease: "power1.inOut" }, 20.2);
+      tl.from("#s5 .kicker", { opacity: 0, y: -20, duration: 0.5, ease: "power2.out" }, 20.6);
+      tl.from("#s5 h2 .scheme", { opacity: 0, duration: 0.6, ease: "power2.out" }, 20.85);
+      tl.from("#s5 h2 .em", { opacity: 0, scale: 0.85, duration: 0.7, ease: "back.out(1.6)" }, 21.05);
+      tl.from("#s5 .sub", { opacity: 0, y: 20, duration: 0.55, ease: "power2.out" }, 21.4);
+      tl.from("#s5 .meta span", { opacity: 0, y: 14, duration: 0.45, stagger: 0.18, ease: "power2.out" }, 21.7);
+      tl.to("#s5 .meta .dot", { opacity: 0.4, duration: 0.8, repeat: 3, yoyo: true, ease: "sine.inOut" }, 22.4);
+      /* gentle outro fade */
+      tl.to("#s5 .scene-content", { opacity: 0, duration: 0.5, ease: "power1.inOut" }, 23.4);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
