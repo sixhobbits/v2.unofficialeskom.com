@@ -14,7 +14,7 @@ materialization:
     strategy: create+replace
 
 depends:
-    - raw.supply_build_up_csv
+    - raw.portal_csv
     - raw.supply_build_up_powerbi
     - raw.station_build_up_legacy_content
     - raw.esk_bulk_content
@@ -78,7 +78,7 @@ custom_checks:
 
 -- Normalise series names consistently across all sources
 WITH normalise AS (
-    SELECT timestamp, series, value, 'csv'     AS src FROM raw.supply_build_up_csv     WHERE timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
+    SELECT timestamp, series, value, 'csv'     AS src FROM raw.portal_csv             WHERE slug = 'supply-side/station-build-up-for-yesterday' AND timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
     UNION ALL
     SELECT timestamp, series, value, 'powerbi' AS src FROM raw.supply_build_up_powerbi WHERE timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
     UNION ALL

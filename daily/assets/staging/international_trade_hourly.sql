@@ -20,7 +20,7 @@ materialization:
     strategy: create+replace
 
 depends:
-    - raw.supply_build_up_csv
+    - raw.portal_csv
     - raw.supply_build_up_powerbi
     - raw.station_build_up_legacy_content
     - raw.esk_bulk_content
@@ -58,7 +58,7 @@ custom_checks:
 @bruin */
 
 WITH normalise AS (
-    SELECT timestamp, series, TRY_CAST(value AS DOUBLE) AS value, 'csv'     AS src FROM raw.supply_build_up_csv     WHERE timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
+    SELECT timestamp, series, TRY_CAST(value AS DOUBLE) AS value, 'csv'     AS src FROM raw.portal_csv             WHERE slug = 'supply-side/station-build-up-for-yesterday' AND timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
     UNION ALL
     SELECT timestamp, series, TRY_CAST(value AS DOUBLE) AS value, 'powerbi' AS src FROM raw.supply_build_up_powerbi WHERE timestamp IS NOT NULL AND series IS NOT NULL AND value IS NOT NULL
     UNION ALL

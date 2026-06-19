@@ -8,9 +8,6 @@ materialization:
 parameters:
     enforce_schema: true
 
-depends:
-    - raw.supply_build_up_csv_fetch
-
 description: |
     Fresh fetch of the PowerBI report — overwritten on every run. Holds
     only THIS run's scrape data; downstream SQL splits it into the
