@@ -129,25 +129,25 @@ export function timeSeriesOption(
     grid: {top: 50, right: 18, bottom: isMobile ? 90 : 70, left: 56},
     xAxis: {
       type: 'time',
-      // ECharts' default time axis uses a two-tier label scheme that forces an
-      // extra tick on the 1st of each month, crowding ticks near boundaries
-      // (29 → May → 6) and landing on odd days. Supplying an explicit formatter
-      // switches it to plain, evenly-spaced interval ticks; minInterval ≥1 week
-      // keeps day-level ticks from bunching, and the formatter labels the month
-      // (or year, near January) on the first tick of each month, days otherwise.
-      minInterval: 7 * 24 * 3600 * 1000,
+      // Let ECharts' native time axis choose tick density and assign each tick a
+      // level (year/month/day/hour); the object formatter then labels each tick
+      // once by its own level. This adapts to zoom automatically — roughly a tick
+      // per day when the window is short, per week/month as it widens — and shows
+      // a month name exactly once (on its first-of-month tick) instead of the old
+      // hand-rolled "day ≤ 7 → month" rule, which printed "Jun" for every tick
+      // that happened to land in the first week and odd day numbers elsewhere.
+      // hideOverlap drops any labels that would collide at month boundaries.
       axisLabel: {
         fontSize: 10,
         color: P.axisLabel,
         hideOverlap: true,
         margin: 10,
-        formatter: (value: number) => {
-          const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const d = new Date(value); // local time, matching ECharts' tick placement
-          const day = d.getDate();
-          const mon = d.getMonth();
-          if (day <= 7) return mon === 0 ? String(d.getFullYear()) : M[mon];
-          return String(day);
+        formatter: {
+          year: '{yyyy}',
+          month: '{MMM}',
+          day: '{d}',
+          hour: '{HH}:{mm}',
+          minute: '{HH}:{mm}',
         },
       },
       axisLine: {lineStyle: {color: P.axisLine}},
