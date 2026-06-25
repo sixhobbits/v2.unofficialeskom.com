@@ -105,8 +105,10 @@ best AS (
 )
 SELECT
     timestamp,
-    MAX(value) FILTER (WHERE series_key IN ('thermal_gen_excl_pumping_and_sco',
-                                            'thermal_generation'))             AS thermal_gen_excl_pumping_and_sco,
+    COALESCE(
+        MAX(value) FILTER (WHERE series_key = 'thermal_gen_excl_pumping_and_sco'),
+        MAX(value) FILTER (WHERE series_key = 'thermal_generation')
+    )                                                                           AS thermal_gen_excl_pumping_and_sco,
     MAX(value) FILTER (WHERE series_key = 'nuclear_generation')               AS nuclear_generation,
     MAX(value) FILTER (WHERE series_key = 'eskom_ocgt_generation')            AS eskom_ocgt_generation,
     MAX(value) FILTER (WHERE series_key = 'eskom_gas_generation')             AS eskom_gas_generation,
@@ -115,8 +117,10 @@ SELECT
     MAX(value) FILTER (WHERE series_key = 'pumped_water_generation')          AS pumped_water_generation,
     MAX(value) FILTER (WHERE series_key = 'international_imports')            AS international_imports,
     MAX(value) FILTER (WHERE series_key = 'ils_usage')                        AS ils_usage,
-    MAX(value) FILTER (WHERE series_key IN ('manual_load_reduction_mlr',
-                                            'manual_load_reduction'))          AS manual_load_reduction_mlr,
+    COALESCE(
+        MAX(value) FILTER (WHERE series_key = 'manual_load_reduction_mlr'),
+        MAX(value) FILTER (WHERE series_key = 'manual_load_reduction')
+    )                                                                           AS manual_load_reduction_mlr,
     MAX(value) FILTER (WHERE series_key = 'ios_excl_ils_and_mlr')             AS ios_excl_ils_and_mlr,
     MAX(value) FILTER (WHERE series_key = 'wind')                             AS wind,
     MAX(value) FILTER (WHERE series_key = 'pv')                               AS pv,
