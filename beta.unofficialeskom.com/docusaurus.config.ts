@@ -38,6 +38,20 @@ const config: Config = {
       innerHTML:
         "try{var k='theme-d92';if(!localStorage.getItem(k)){var m=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';localStorage.setItem(k,m);localStorage.setItem('theme',m);}}catch(e){}",
     },
+    // Privacy-friendly analytics by Plausible
+    {
+      tagName: 'script',
+      attributes: {
+        async: 'true',
+        src: 'https://plausible.io/js/pa-3Zy4dHgOqFFz1Yc-yG7Qf.js',
+      },
+    },
+    {
+      tagName: 'script',
+      attributes: {},
+      innerHTML:
+        "window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()",
+    },
   ],
 
   // Even if you don't use internationalization, you can use this field to set
