@@ -5,9 +5,10 @@ tags:
 type: duckdb.sql
 
 description: |
-    Daily average UCLF+OCLF as percentage of installed capacity (47,276 MW),
-    keyed by (year, mmdd) for year-on-year comparison plotting. Long-form;
-    the dashboard pivots into per-year series.
+    Daily average UCLF+OCLF as percentage of installed capacity (the day's
+    month from staging.installed_capacity_monthly, latest month step-held for
+    the recent tail), keyed by (year, mmdd) for year-on-year comparison
+    plotting. Long-form; the dashboard pivots into per-year series.
 
     Unions three sources of the combined Hourly UCLF+OCLF (MW) series and
     prefers the freshest per hour:
@@ -32,6 +33,7 @@ depends:
     - raw.uclf_oclf_trend_csv
     - raw.uclf_oclf_trend_powerbi
     - raw.eskom_metrics_uclf_oclf_hourly
+    - staging.installed_capacity_monthly
 
 columns:
     - name: year
@@ -80,9 +82,15 @@ daily AS (
     SELECT
         strftime(ts, '%Y')   AS year,
         strftime(ts, '%m-%d') AS mmdd,
-        AVG(uclf_oclf_mw) / 47276.0 * 100 AS daily_avg_pct,
+        AVG(h.uclf_oclf_mw) / AVG(COALESCE(
+            m.installed_mw,
+            (SELECT installed_mw FROM staging.installed_capacity_monthly
+             ORDER BY month_start DESC LIMIT 1)
+        )) * 100 AS daily_avg_pct,
         COUNT(*) AS hours_covered
-    FROM hourly
+    FROM hourly h
+    LEFT JOIN staging.installed_capacity_monthly m
+           ON m.month_start = date_trunc('month', h.ts)::DATE
     GROUP BY 1, 2
 )
 SELECT year, mmdd, daily_avg_pct

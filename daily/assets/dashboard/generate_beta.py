@@ -13,16 +13,22 @@ depends:
     - staging.peak_demand_yoy_weekly
     - staging.rooftop_pv_monthly
     - staging.weekly_status_outlook
+    - staging.demand_capacity_hourly
+    - staging.installed_capacity_monthly
+    - staging.eaf_weekly_official
+    - staging.eaf_monthly
     - raw.portal_csv
     - raw.portal_powerbi
+    - raw.uclf_oclf_trend_csv
+    - raw.esk_bulk_content
 
 description: |
-    Generates beta.unofficialeskom.com/index.html. Reads exclusively from
-    staging.* tables — no raw.* or external SQLite. Chart→column lineage is
-    declared in CHART_SOURCES and validated against duckdb's information_schema
-    at build time so a renamed staging column fails the build instead of
-    silently emptying a chart. The rendered HTML carries a "Data sources"
-    panel derived from the same manifest.
+    Generates beta.unofficialeskom.com/static/dashboard-data.json. Reads
+    mostly from staging.* tables (plus a few raw.* reads listed above).
+    Chart→column lineage is declared in CHART_SOURCES and validated against
+    duckdb's information_schema at build time so a renamed staging column
+    fails the build instead of silently emptying a chart. The site's "Data
+    sources" panel derives from the same manifest.
 @bruin """
 
 import json
@@ -31,8 +37,6 @@ from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 
 import duckdb
-
-INSTALLED_CAPACITY_MW = 47276.0  # Eskom installed capacity; CLF % ↔ MW conversion
 
 ROOT           = Path(__file__).resolve().parents[3]
 DB_PATH        = ROOT / "warehouse" / "eskom.duckdb"
@@ -106,6 +110,12 @@ CHART_SOURCES: dict[str, list[str]] = {
     "outlook-status-forecast": ["staging.weekly_status_outlook.week_start",
                                 "staging.weekly_status_outlook.likely_risk_mw",
                                 "staging.weekly_status_outlook.status"],
+    # Eskom's OWN published EAF (vs our derived 100 - PCLF - UCLF - OCLF):
+    # weekly overlays the hourly EAF chart, monthly the Long-term page.
+    "chart-eaf-official":  ["staging.eaf_weekly_official.week_start",
+                            "staging.eaf_weekly_official.eaf_pct",
+                            "staging.eaf_monthly.month_start",
+                            "staging.eaf_monthly.eaf_pct"],
 }
 
 
@@ -214,32 +224,34 @@ def load_yoy_weekly(conn: duckdb.DuckDBPyConnection, table: str, value_col: str)
 def load_outage_daily(conn: duckdb.DuckDBPyConnection) -> dict:
     """Load merged daily outage metrics. Already daily-averaged in SQL."""
     rows = conn.execute(
-        "SELECT day, eaf_pct, pclf_pct, uclf_pct, oclf_pct, "
+        "SELECT day, eaf_pct, pclf_pct, uclf_pct, oclf_pct, installed_mw, "
         "pclf_src, uclf_src, oclf_src "
         "FROM staging.outage_metrics_daily ORDER BY day"
     ).fetchall()
     eaf, pclf, uclf, oclf = [], [], [], []
-    # Capability loss factors in MW (pct of installed capacity → MW), plus their
-    # total — for the Outages "Capability loss factors" chart.
+    # Capability loss factors in MW (pct of installed capacity → MW, using the
+    # same per-day denominator the SQL used for MW → pct), plus their total —
+    # for the Outages "Capability loss factors" chart.
     clf_planned, clf_unplanned, clf_other, clf_total = [], [], [], []
     latest_eaf = latest_eaf_ts = None
     src_counts: dict[str, int] = {}
-    for day, e, p, u, o, ps, us, os_ in rows:
+    for day, e, p, u, o, cap, ps, us, os_ in rows:
         dt = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
         ts = _ts_ms(dt)
-        eaf.append([ts, round(e, 1)])
+        eaf.append([ts, round(e, 1) if e is not None else None])
         pclf.append([ts, round(p, 1) if p is not None else None])
         uclf.append([ts, round(u, 1) if u is not None else None])
         oclf.append([ts, round(o, 1) if o is not None else None])
-        p_mw = (p or 0.0) / 100 * INSTALLED_CAPACITY_MW
-        u_mw = (u or 0.0) / 100 * INSTALLED_CAPACITY_MW
-        o_mw = (o or 0.0) / 100 * INSTALLED_CAPACITY_MW
+        p_mw = (p or 0.0) / 100 * cap
+        u_mw = (u or 0.0) / 100 * cap
+        o_mw = (o or 0.0) / 100 * cap
         clf_planned.append([ts, round(p_mw)])
         clf_unplanned.append([ts, round(u_mw)])
         clf_other.append([ts, round(o_mw)])
         clf_total.append([ts, round(p_mw + u_mw + o_mw)])
-        latest_eaf = e
-        latest_eaf_ts = ts
+        if e is not None:
+            latest_eaf = e
+            latest_eaf_ts = ts
         for s in (ps, us, os_):
             if s:
                 src_counts[s] = src_counts.get(s, 0) + 1
@@ -510,10 +522,15 @@ def load_station_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict
 def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
     """Hourly EAF + capability-loss split (%) for the last ~3 months.
 
-    The bulk feed (staging.outage_metrics_hourly) lags ~a few days, so the most
+    The bulk feed (staging.outage_metrics_hourly) lags weeks, so the most
     recent hours — exactly the ones that explain a dip in the EAF headline — are
-    missing. We append those from the hourly UCLF+OCLF trend CSV, holding PCLF
-    and OCLF at the last bulk value (PCLF only publishes weekly), and derive EAF.
+    missing. We append those from the hourly UCLF+OCLF trend CSV, taking PCLF
+    and OCLF from the CURRENT weekly capacity-breakdown report (step-held per
+    day; PCLF only publishes weekly) and deriving EAF. Holding PCLF at the last
+    bulk value instead is wrong whenever the bulk feed is stale: on 2026-07-02
+    it held a four-week-old 13.9% against the current week's 8.8%, dragging the
+    tail ~5 pp below the daily dial. Falls back to the last bulk values only if
+    no weekly report covers the tail.
     """
     rows = conn.execute(
         "SELECT timestamp, eaf_pct, pclf_pct, uclf_pct, oclf_pct "
@@ -532,7 +549,8 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
         last_ts, last_pclf, last_oclf = ts, p, o
 
     # Recent tail from the trend CSV (hourly UCLF+OCLF in MW), where the bulk
-    # feed hasn't reached yet. PCLF/OCLF held at the last bulk value.
+    # feed hasn't reached yet. PCLF/OCLF step-held from the weekly reports
+    # (fallback: last bulk value), MW→% via the latest known installed capacity.
     tail_n = 0
     if last_ts is not None and last_pclf is not None:
         tail = conn.execute(
@@ -540,14 +558,29 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
             "WHERE series = 'Hourly UCLF+OCLF' AND timestamp > ? GROUP BY 1 ORDER BY 1",
             [last_ts],
         ).fetchall()
-        held_oclf = last_oclf or 0.0
+        cap_mw = conn.execute(
+            "SELECT installed_mw FROM staging.installed_capacity_monthly "
+            "ORDER BY month_start DESC LIMIT 1"
+        ).fetchone()[0]
+        weekly = conn.execute(
+            "SELECT week_start, pclf_pct, oclf_pct FROM staging.eaf_weekly_official "
+            "WHERE pclf_pct IS NOT NULL ORDER BY week_start"
+        ).fetchall()
+
+        def held_for(day):
+            for ws, p, o in reversed(weekly):
+                if ws <= day:
+                    return p, (o if o is not None else 0.0)
+            return last_pclf, (last_oclf or 0.0)
+
         for ts, combined_mw in tail:
-            combined_pct = combined_mw / INSTALLED_CAPACITY_MW * 100
+            held_pclf, held_oclf = held_for(ts.date())
+            combined_pct = combined_mw / cap_mw * 100
             uclf = max(0.0, combined_pct - held_oclf)
-            eaf = 100 - last_pclf - uclf - held_oclf
+            eaf = 100 - held_pclf - uclf - held_oclf
             t = _ts_ms(ts)
             out["eaf"].append([t, round(eaf, 1)])
-            out["pclf"].append([t, round(last_pclf, 1)])
+            out["pclf"].append([t, round(held_pclf, 1)])
             out["uclf"].append([t, round(uclf, 1)])
             out["oclf"].append([t, round(held_oclf, 1)])
             tail_n += 1
@@ -555,11 +588,34 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
     return out
 
 
+def load_official_eaf(conn: duckdb.DuckDBPyConnection) -> dict:
+    """Eskom's OWN published EAF — weekly (2019-04 →) and monthly (2021-03 →).
+
+    Shipped alongside the derived EAF so the dashboard can show both; the
+    derived number should track these closely (a staging custom check alarms
+    at >3 pp weekly drift).
+    """
+    weekly = [
+        [_ts_ms(datetime(d.year, d.month, d.day, tzinfo=timezone.utc)), round(v, 1)]
+        for d, v in conn.execute(
+            "SELECT week_start, eaf_pct FROM staging.eaf_weekly_official ORDER BY week_start"
+        ).fetchall()
+    ]
+    monthly = [
+        [_ts_ms(m), round(v, 1)]
+        for m, v in conn.execute(
+            "SELECT month_start, eaf_pct FROM staging.eaf_monthly ORDER BY month_start"
+        ).fetchall()
+    ]
+    print(f"  official EAF: {len(weekly)} weeks, {len(monthly)} months")
+    return {"weekly": weekly, "monthly": monthly}
+
+
 def load_re_installed(conn: duckdb.DuckDBPyConnection) -> list[list]:
     """Monthly-average Total RE Installed Capacity (MW) from the ESK bulk."""
     rows = conn.execute(
         "SELECT date_trunc('month', timestamp) AS m, avg(TRY_CAST(value AS DOUBLE)) AS v "
-        "FROM raw.esk_bulk_fetch "
+        "FROM raw.esk_bulk_content "
         "WHERE series = 'Total RE Installed Capacity' AND TRY_CAST(value AS DOUBLE) > 0 "
         "GROUP BY 1 ORDER BY 1"
     ).fetchall()
@@ -1014,7 +1070,9 @@ def build_series(merged: dict) -> dict:
         pumped_h.append([ts, pmp])
         hydro_h.append([ts, hyd])
 
-        demand = rec.get("Residual_Demand") or (t + n + oe + oi + gas + hyd + pmp + imp + ils + mlr + ios)
+        demand = rec.get("Residual_Demand")
+        if demand is None:  # `or` would also discard a legitimate 0.0 reading
+            demand = t + n + oe + oi + gas + hyd + pmp + imp + ils + mlr + ios
         gen = t + n + oe + oi + gas + hyd + pmp + imp
         gen_h.append([ts, gen])
         demand_h.append([ts, demand])
@@ -1119,6 +1177,9 @@ def build_payload(data: dict) -> dict:
         "latestDemand":    data["latest_demand"],
         "latestEaf":       data["latest_eaf"],
         "latestEafLabel":  eaf_label,
+        # Eskom's own published EAF, for display against the derived series.
+        "officialEafWeekly":  data.get("official_eaf", {}).get("weekly", []),
+        "officialEafMonthly": data.get("official_eaf", {}).get("monthly", []),
         "windAvg":         data["wind_avg"],
         "pvAvg":           data["pv_avg"],
         "cspAvg":          data["csp_avg"],
@@ -1169,6 +1230,7 @@ def main() -> None:
         status_outlook = load_status_outlook(conn)
         weekly_reports = load_weekly_reports(conn)
         re_installed = load_re_installed(conn)
+        official_eaf = load_official_eaf(conn)
         station_hourly = load_station_hourly(conn)
         outage_hourly = load_outage_hourly(conn)
         loadshedding = load_loadshedding(conn)
@@ -1215,6 +1277,7 @@ def main() -> None:
     data["outlook"] = {**outlook_series, **outlook_metrics, "statusForecast": status_outlook}
     data["weekly_reports"] = weekly_reports
     data["re_installed"] = re_installed
+    data["official_eaf"] = official_eaf
     data["station_hourly"] = station_hourly
     data["outage_hourly"] = outage_hourly
     data["annual_financials"] = annual_financials

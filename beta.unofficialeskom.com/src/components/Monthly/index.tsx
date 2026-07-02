@@ -44,6 +44,7 @@ type DashboardData = {
   clfUnplanned: Point[];
   clfOther: Point[];
   clfTotal: Point[];
+  officialEafMonthly?: Point[];
   genByYear: Record<string, Array<number | null>>;
   demandByYear: Record<string, Array<number | null>>;
 };
@@ -188,7 +189,12 @@ export default function Monthly(): ReactNode {
     );
 
     return {
-      eaf: ts([line('EAF', m(eafDaily), '#2e9e4f', 2)], {unit: '%', decimals: 1}),
+      eaf: ts([
+        line('EAF (derived)', m(eafDaily), '#2e9e4f', 2),
+        // Eskom's own published monthly EAF — already monthly, so only the
+        // incomplete-month cut applies, not the daily→monthly bucketing.
+        {...line('EAF (Eskom published)', keep(data.officialEafMonthly ?? []), '#8e44ad', 1.4), lineStyle: {width: 1.4, color: '#8e44ad', type: 'dashed'}},
+      ], {unit: '%', decimals: 1}),
       clf: ts([
         line('Planned (PCLF)', m(data.clfPlanned), '#f1c40f'),
         line('Unplanned (UCLF)', m(data.clfUnplanned), '#e57373'),
