@@ -8,12 +8,10 @@ materialization:
 description: |
     Reads the eskom.sqlite ESK bulk export (built from monthly CSVs via
     create_sqlite_from_csvs.sh). Covers 2017-04-01 to present. Melts
-    wide→long and hashes each (timestamp, series) pair. Overwritten on
-    every run; esk_bulk_content is the durable insert-only store.
+    wide→long. Overwritten on every run; esk_bulk_content is the durable
+    store (merge on (timestamp, series), value updated on revision).
 
 columns:
-    - name: row_hash
-      type: VARCHAR
     - name: timestamp
       type: TIMESTAMP
     - name: series
@@ -22,7 +20,6 @@ columns:
       type: DOUBLE
 @bruin """
 
-import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -46,10 +43,9 @@ def materialize() -> pd.DataFrame:
         id_vars=["timestamp"], value_vars=value_cols,
         var_name="series", value_name="value",
     )
+    # source sqlite stores readings as TEXT (with '' for missing) — coerce to
+    # real doubles here so downstream never needs TRY_CAST
+    melted["value"] = pd.to_numeric(melted["value"], errors="coerce")
     melted = melted.dropna(subset=["value"])
     melted = melted.drop_duplicates(subset=["timestamp", "series"], keep="last")
-    melted["row_hash"] = melted.apply(
-        lambda r: hashlib.sha256(f"{r['timestamp']}|{r['series']}".encode()).hexdigest(),
-        axis=1,
-    )
-    return melted[["row_hash", "timestamp", "series", "value"]]
+    return melted[["timestamp", "series", "value"]]
