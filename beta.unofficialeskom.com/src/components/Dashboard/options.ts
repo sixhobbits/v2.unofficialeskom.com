@@ -54,7 +54,7 @@ type SeriesItem = {
 
 export function timeSeriesOption(
   series: SeriesItem[],
-  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean; monthly?: boolean; isMobile?: boolean} = {},
+  opts: {unit?: string; decimals?: number; yAxis?: any; hourly?: boolean; monthly?: boolean; isMobile?: boolean; zoomStart?: number} = {},
   P: Palette,
 ) {
   const unit = opts.unit ?? 'MW';
@@ -168,7 +168,9 @@ export function timeSeriesOption(
     dataZoom: [
       {
         type: 'slider',
-        start: 75,
+        // Default window opens on the last 25% of history; pass zoomStart to
+        // open wider/narrower instead of mutating the returned option.
+        start: opts.zoomStart ?? 75,
         end: 100,
         // The slider always spans the full history, so on a phone one pixel of
         // handle travel is ~a week — a small window is impossible to grab.

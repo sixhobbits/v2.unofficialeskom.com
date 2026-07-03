@@ -1,8 +1,8 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useMemo} from 'react';
 import type {ReactNode} from 'react';
 import {useColorMode} from '@docusaurus/theme-common';
-import useBaseUrl from '@docusaurus/useBaseUrl';
 
+import {useDashboardData, useIsMobile, type Point} from '../../lib/dashboardData';
 import {PALETTES, timeSeriesOption, type Palette} from '../Dashboard/options';
 import {ChartCard, monthlyYoyOption} from '../Dashboard/index';
 import card from '../Dashboard/styles.module.css';
@@ -12,42 +12,6 @@ import card from '../Dashboard/styles.module.css';
 // (easy to delete if we settle on one layout): it reuses the shared
 // timeSeriesOption but builds its own monthly series from the daily arrays in
 // dashboard-data.json.
-
-type Point = [number, number | null];
-
-type DashboardData = {
-  thermalAvg: Point[];
-  nuclearAvg: Point[];
-  ocgtMonthlyAvg: Point[];
-  ocgtMonthlyMax: Point[];
-  hydroAvg: Point[];
-  pumpedAvg: Point[];
-  reInstalledMonthly: Point[];
-  windAvg: Point[];
-  pvAvg: Point[];
-  cspAvg: Point[];
-  otherReAvg: Point[];
-  genAvg: Point[];
-  demandAvg: Point[];
-  importsAvg: Point[];
-  exportsAvg: Point[];
-  iosAvg: Point[];
-  mlrAvg: Point[];
-  ilsAvg: Point[];
-  iosMax: Point[];
-  mlrMax: Point[];
-  ilsMax: Point[];
-  pclfAvg: Point[];
-  uclfAvg: Point[];
-  oclfAvg: Point[];
-  clfPlanned: Point[];
-  clfUnplanned: Point[];
-  clfOther: Point[];
-  clfTotal: Point[];
-  officialEafMonthly?: Point[];
-  genByYear: Record<string, Array<number | null>>;
-  demandByYear: Record<string, Array<number | null>>;
-};
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -135,42 +99,14 @@ function line(name: string, data: Point[], color: string, width = 1.6) {
 export default function Monthly(): ReactNode {
   const {colorMode} = useColorMode();
   const P: Palette = PALETTES[colorMode === 'dark' ? 'dark' : 'light'];
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(dataUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((j) => !cancelled && setData(j))
-      .catch((e) => !cancelled && setErr(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [dataUrl]);
-
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(max-width: 720px)');
-    setIsMobile(mq.matches);
-    const h = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', h);
-    return () => mq.removeEventListener('change', h);
-  }, []);
+  const {data, err} = useDashboardData();
+  const isMobile = useIsMobile();
 
   const charts = useMemo(() => {
     if (!data) return null;
     // Monthly time-series with a zoom slider opened on the full history.
-    const ts = (series: any[], opts: any = {}) => {
-      const o = timeSeriesOption(series, {...opts, monthly: true, isMobile}, P) as any;
-      o.dataZoom[0].start = 0;
-      return o;
-    };
+    const ts = (series: any[], opts: any = {}) =>
+      timeSeriesOption(series, {...opts, monthly: true, isMobile, zoomStart: 0}, P);
     // Drop the incomplete trailing month everywhere (a few days isn't a
     // comparable monthly average). Anchor on the FRESHEST data across all feeds
     // — outage metrics (PCLF/UCLF/OCLF) often run a day or two ahead of demand,
@@ -193,7 +129,7 @@ export default function Monthly(): ReactNode {
         line('EAF (derived)', m(eafDaily), '#2e9e4f', 2),
         // Eskom's own published monthly EAF — already monthly, so only the
         // incomplete-month cut applies, not the daily→monthly bucketing.
-        {...line('EAF (Eskom published)', keep(data.officialEafMonthly ?? []), '#8e44ad', 1.4), lineStyle: {width: 1.4, color: '#8e44ad', type: 'dashed'}},
+        {...line('EAF (Eskom published)', keep(data.officialEafMonthly), '#8e44ad', 1.4), lineStyle: {width: 1.4, color: '#8e44ad', type: 'dashed'}},
       ], {unit: '%', decimals: 1}),
       clf: ts([
         line('Planned (PCLF)', m(data.clfPlanned), '#f1c40f'),

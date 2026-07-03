@@ -1,9 +1,8 @@
-import {useEffect, useState} from 'react';
 import type {ReactNode} from 'react';
 import ReactECharts from 'echarts-for-react';
 import {useColorMode} from '@docusaurus/theme-common';
-import useBaseUrl from '@docusaurus/useBaseUrl';
 
+import {useDashboardData} from '../../lib/dashboardData';
 import card from '../Dashboard/styles.module.css';
 
 type AnnualFinancials = {
@@ -15,10 +14,6 @@ type AnnualFinancials = {
   employee_costs: (number | null)[];
   depreciation: (number | null)[];
   profit_before_tax: (number | null)[];
-};
-
-type DashboardData = {
-  annualFinancials?: AnnualFinancials;
 };
 
 function barOption(
@@ -146,21 +141,8 @@ function fmt(v: number | null | undefined): string {
 export default function Financials(): ReactNode {
   const {colorMode} = useColorMode();
   const isDark = colorMode === 'dark';
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [data, setData] = useState<AnnualFinancials | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(dataUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<DashboardData>;
-      })
-      .then((j) => !cancelled && setData(j.annualFinancials ?? null))
-      .catch((e) => !cancelled && setErr(String(e)));
-    return () => { cancelled = true; };
-  }, [dataUrl]);
+  const {data: dash, err} = useDashboardData();
+  const data = (dash?.annualFinancials ?? null) as AnnualFinancials | null;
 
   if (err) return <div style={{padding: '2rem', color: 'red'}}>Error: {err}</div>;
   if (!data || !data.years?.length) return <div style={{padding: '2rem'}}>Loading financial data…</div>;

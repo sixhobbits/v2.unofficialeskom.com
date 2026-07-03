@@ -1,9 +1,9 @@
 import {useEffect, useMemo, useState} from 'react';
 import type {ReactNode} from 'react';
 import {useColorMode} from '@docusaurus/theme-common';
-import useBaseUrl from '@docusaurus/useBaseUrl';
 import clsx from 'clsx';
 
+import {useDashboardData, useIsMobile} from '../../lib/dashboardData';
 import {PALETTES, timeSeriesOption, type Palette} from '../Dashboard/options';
 import {ChartCard} from '../Dashboard/index';
 import {Gauge} from '../Dashboard/Gauge';
@@ -56,17 +56,6 @@ const STATUS_LABEL: Record<Status, string> = {
   yellow: 'Tight (<1 GW short of reserves)',
   orange: 'Short of reserves (1–2 GW)',
   red: 'Short of demand + reserves',
-};
-
-type DashboardData = {
-  ocgtEskomHourly: Point[];
-  ocgtIppHourly: Point[];
-  recentPumpedHourly: Point[];
-  totalReductionAvg: Point[];
-  iosAvg: Point[];
-  mlrAvg: Point[];
-  ilsAvg: Point[];
-  outlook: Outlook;
 };
 
 const LINE_BASE = {
@@ -141,33 +130,8 @@ export default function Outlook(): ReactNode {
   const {colorMode} = useColorMode();
   const P: Palette = PALETTES[colorMode === 'dark' ? 'dark' : 'light'];
 
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(dataUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((json) => !cancelled && setData(json))
-      .catch((e) => !cancelled && setErr(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [dataUrl]);
-
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(max-width: 720px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
+  const {data, err} = useDashboardData();
+  const isMobile = useIsMobile();
 
   // Live tick for the MES compliance countdown.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -231,9 +195,9 @@ export default function Outlook(): ReactNode {
         {...LINE_BASE, name: 'Demand forecast — residual', data: o.forecast.residual,
           lineStyle: {width: 1.6, color: '#8e24aa', type: 'dashed'}, itemStyle: {color: '#8e24aa'}},
       ],
-      {hourly: true},
+      // Full range: recent actuals + 3-month forecast.
+      {hourly: true, zoomStart: 0},
     );
-    (forecast as any).dataZoom[0].start = 0; // full range: recent actuals + 3-month forecast
 
     const recent = 14 * 24;
     const ocgt = ts(
@@ -243,30 +207,25 @@ export default function Outlook(): ReactNode {
         {...LINE_BASE, name: 'Dispatchable IPP OCGT', data: arr(data.ocgtIppHourly).slice(-recent), stack: 'ocgt',
           areaStyle: {color: '#66bb6a', opacity: 0.85}, lineStyle: {width: 0}, itemStyle: {color: '#66bb6a'}},
       ],
-      {hourly: true},
+      {hourly: true, zoomStart: 0},
     );
-    (ocgt as any).dataZoom[0].start = 0;
 
     const pumped = ts(
       [
         {...LINE_BASE, name: 'Pumped storage generation', data: arr(data.recentPumpedHourly),
           lineStyle: {width: 1.6, color: '#0277bd'}, areaStyle: {color: '#0277bd', opacity: 0.12}, itemStyle: {color: '#0277bd'}},
       ],
-      {hourly: true, decimals: 1},
+      {hourly: true, decimals: 1, zoomStart: 0},
     );
-    (pumped as any).dataZoom[0].start = 0;
 
     // Demand-reduction charts (daily avg MW), same as the dashboard but opened
     // on the last 7 days; the slider still reaches the full history.
-    const reduction = (series: Point[], color: string) => {
-      const opt = ts(
+    const reduction = (series: Point[], color: string) =>
+      ts(
         [{...LINE_BASE, name: 'Daily avg', data: series, lineStyle: {width: 1.4, color},
           areaStyle: {color, opacity: 0.12}, itemStyle: {color}}],
-        {unit: 'MW', decimals: 1},
+        {unit: 'MW', decimals: 1, zoomStart: startForLastDays(series, 7, 1)},
       );
-      (opt as any).dataZoom[0].start = startForLastDays(series, 7, 1);
-      return opt;
-    };
     const totalReduction = reduction(arr(data.totalReductionAvg), '#d32f2f');
     const ios = reduction(arr(data.iosAvg), '#5e35b1');
     const mlr = reduction(arr(data.mlrAvg), '#ef6c00');

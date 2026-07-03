@@ -20,12 +20,16 @@ const config: Config = {
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
 
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
+  organizationName: 'sixhobbits',
+  projectName: 'v2.unofficialeskom.com',
 
   onBrokenLinks: 'throw',
+
+  // Baked at build time; useDashboardData() appends it as ?v= to the
+  // dashboard-data.json fetch so new JS never reuses a stale cached payload.
+  customFields: {
+    buildId: String(Date.now()),
+  },
 
   // Seed the colorMode storage from prefers-color-scheme on first visit so
   // initial mode follows the OS even though respectPrefersColorScheme is off
@@ -66,13 +70,8 @@ const config: Config = {
     [
       'classic',
       {
-        docs: {
-          sidebarPath: './sidebars.ts',
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
-        },
+        // No docs — the site is dashboard pages + the /updates blog.
+        docs: false,
         blog: {
           // Route kept as /updates (published post URLs); the tab is "Analysis".
           routeBasePath: 'updates',

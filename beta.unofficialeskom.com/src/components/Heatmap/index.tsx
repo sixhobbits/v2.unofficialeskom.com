@@ -2,17 +2,14 @@ import {useEffect, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import ReactECharts from 'echarts-for-react';
 import {useColorMode} from '@docusaurus/theme-common';
-import useBaseUrl from '@docusaurus/useBaseUrl';
+
+import {useDashboardData} from '../../lib/dashboardData';
 
 type DayEntry = [string, number]; // ['2025-02-23', 6]
 
 type Loadshedding = {
   days: DayEntry[];
   streakSinceMs: number | null;
-};
-
-type DashboardData = {
-  loadshedding?: Loadshedding;
 };
 
 const STAGE_COLORS = ['#ebedf0', '#fff59d', '#ffc107', '#ff6f00', '#e53935', '#b71c1c', '#4a0000'];
@@ -148,19 +145,9 @@ function StageLegend({isDark}: {isDark: boolean}) {
 export default function Heatmap(): ReactNode {
   const {colorMode} = useColorMode();
   const isDark = colorMode === 'dark';
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [data, setData] = useState<Loadshedding | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const {data: dash, err} = useDashboardData();
+  const data = (dash?.loadshedding ?? null) as Loadshedding | null;
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(dataUrl)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<DashboardData>; })
-      .then((j) => !cancelled && setData(j.loadshedding ?? null))
-      .catch((e) => !cancelled && setErr(String(e)));
-    return () => { cancelled = true; };
-  }, [dataUrl]);
 
   if (err) return <div style={{padding: '2rem', color: 'red'}}>Error: {err}</div>;
   if (!data?.days?.length) return <div style={{padding: '2rem'}}>Loading…</div>;
