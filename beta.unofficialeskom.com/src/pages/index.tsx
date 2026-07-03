@@ -25,6 +25,18 @@ const SECTIONS: Array<{to: string; title: string; blurb: string}> = [
       'Monthly averages from 2017 to today, with year-over-year comparisons — the slow trends behind the daily noise.',
   },
   {
+    to: '/heatmap',
+    title: 'Heatmap',
+    blurb:
+      'Every day of loadshedding since 2014 as a calendar heatmap, plus the running streak without it.',
+  },
+  {
+    to: '/financials',
+    title: 'Financials',
+    blurb:
+      'Eskom’s annual results — revenue, EBITDA, profit, and the cost lines behind them — from the audited financial statements.',
+  },
+  {
     to: '/updates',
     title: 'Analysis',
     blurb:

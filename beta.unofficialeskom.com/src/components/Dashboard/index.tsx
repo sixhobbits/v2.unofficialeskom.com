@@ -1,77 +1,13 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import ReactECharts from 'echarts-for-react';
 import {useColorMode} from '@docusaurus/theme-common';
-import useBaseUrl from '@docusaurus/useBaseUrl';
 import clsx from 'clsx';
 
+import {useDashboardData, useIsMobile, type Point} from '../../lib/dashboardData';
 import {PALETTES, timeSeriesOption, type Palette} from './options';
 import {Gauge} from './Gauge';
 import styles from './styles.module.css';
-
-type Point = [number, number | null];
-
-type DashboardData = {
-  latestTs: number | null;
-  thermalMin: Point[];
-  thermalAvg: Point[];
-  thermalMax: Point[];
-  nuclearAvg: Point[];
-  ocgtEskomMax: Point[];
-  ocgtIppMax: Point[];
-  ocgtTotalAvg: Point[];
-  ocgtEskomHourly: Point[];
-  ocgtIppHourly: Point[];
-  genAvg: Point[];
-  genMax: Point[];
-  demandAvg: Point[];
-  demandMax: Point[];
-  availableCapacityAvg: Point[];
-  headroomAvg: Point[];
-  pclfAvg: Point[];
-  uclfAvg: Point[];
-  clfPlanned: Point[];
-  clfUnplanned: Point[];
-  clfOther: Point[];
-  clfTotal: Point[];
-  iosAvg: Point[];
-  mlrAvg: Point[];
-  ilsAvg: Point[];
-  totalReductionAvg: Point[];
-  iosMax: Point[];
-  mlrMax: Point[];
-  ilsMax: Point[];
-  totalReductionMax: Point[];
-  pumpedAvg: Point[];
-  importsAvg: Point[];
-  exportsAvg: Point[];
-  latestGen: number;
-  latestDemand: number;
-  latestEaf: number | null;
-  latestEafLabel: string;
-  windAvg: Point[];
-  pvAvg: Point[];
-  cspAvg: Point[];
-  otherReAvg: Point[];
-  uclfOclfXKeys: string[];
-  uclfOclfByYear: Record<string, Array<number | null>>;
-  eafWeeks: number[];
-  eafByYear: Record<string, Array<number | null>>;
-  stationHourly: Record<string, Point[]>;
-  outageHourly: {eaf: Point[]; pclf: Point[]; uclf: Point[]; oclf: Point[]};
-  officialEafWeekly?: Point[];
-  yoyMonths: number[];
-  genByYear: Record<string, Array<number | null>>;
-  demandByYear: Record<string, Array<number | null>>;
-  oclfAvg: Point[];
-  capacityByYear: Record<string, Array<number | null>>;
-  peakDemandByYear: Record<string, Array<number | null>>;
-  rooftopProvinces: string[];
-  rooftopSeries: Record<string, Point[]>;
-  rooftopProvincesPerHh: string[];
-  rooftopSeriesPerHh: Record<string, Point[]>;
-  chartSources: Record<string, string[]>;
-};
 
 const ROOFTOP_PALETTE = [
   '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -455,23 +391,7 @@ export default function Dashboard(): ReactNode {
   const {colorMode} = useColorMode();
   const P: Palette = PALETTES[colorMode === 'dark' ? 'dark' : 'light'];
 
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(dataUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((json) => !cancelled && setData(json))
-      .catch((e) => !cancelled && setErr(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [dataUrl]);
+  const {data, err} = useDashboardData();
 
   const displayTs = useMemo(() => {
     if (!data?.latestTs) return 'Unknown';
@@ -480,7 +400,7 @@ export default function Dashboard(): ReactNode {
 
   const rooftopColorByProv = useMemo(() => {
     const map: Record<string, string> = {};
-    (data?.rooftopProvinces || []).forEach((prov, i) => {
+    (data?.rooftopProvinces ?? []).forEach((prov, i) => {
       map[prov] = ROOFTOP_PALETTE[i % ROOFTOP_PALETTE.length];
     });
     return map;
@@ -510,15 +430,7 @@ export default function Dashboard(): ReactNode {
     if (el && kid) el.scrollTo({left: kid.offsetLeft, behavior: 'smooth'});
   };
 
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(max-width: 720px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   const charts = useMemo(() => {
     if (!data) return null;
@@ -665,10 +577,8 @@ export default function Dashboard(): ReactNode {
           z: 5,
         },
       ],
-      {hourly: true});
-    // Override the default window (last 25% via start:75) so the hourly chart
-    // opens on the last ~14d.
-    (ocgtHourly as any).dataZoom[0].start = hourlyDefaultStart;
+      // Open on the last ~14d of the ~1-year hourly window.
+      {hourly: true, zoomStart: hourlyDefaultStart});
 
     const pumpedStorage = ts(
       [{...LINE_BASE, name: 'Pumped storage generation (daily avg)', data: data.pumpedAvg, lineStyle: {width: 1.4, color: '#0277bd'}, areaStyle: {color: '#0277bd', opacity: 0.12}, itemStyle: {color: '#0277bd'}}],
@@ -736,15 +646,14 @@ export default function Dashboard(): ReactNode {
     // 7-day trailing mean so the daily (UCLF) and weekly-held (PCLF/OCLF)
     // sources read as one consistent trend. Opens on the last ~3 months with a
     // zoom slider (the YoY view lives in the EAF chart).
+    const outageLen = data.uclfAvg.length;
     const outagesYoy = ts(
       [
         {...LINE_BASE, name: 'Unplanned (UCLF)', data: rollingMean(data.uclfAvg), lineStyle: {width: 1.6, color: '#e53935'}, itemStyle: {color: '#e53935'}},
         {...LINE_BASE, name: 'Planned (PCLF)', data: rollingMean(data.pclfAvg), lineStyle: {width: 1.6, color: '#f1c40f'}, itemStyle: {color: '#f1c40f'}},
         {...LINE_BASE, name: 'Other (OCLF)', data: rollingMean(data.oclfAvg), lineStyle: {width: 1.4, color: '#37474f'}, itemStyle: {color: '#37474f'}},
       ],
-      {unit: '%', decimals: 1});
-    const outageLen = data.uclfAvg.length;
-    (outagesYoy as any).dataZoom[0].start = outageLen > 90 ? ((outageLen - 90) / outageLen) * 100 : 0;
+      {unit: '%', decimals: 1, zoomStart: outageLen > 90 ? ((outageLen - 90) / outageLen) * 100 : 0});
 
     // Hourly detail for the last ~3 months (no lttb sampling — it misaligns
     // stacked areas). Both open on the full 3-month window.
@@ -758,16 +667,15 @@ export default function Dashboard(): ReactNode {
       ['wind', 'Wind', '#26c6da'], ['pv', 'PV', '#fdd835'], ['otherRe', 'Other RE', '#9ccc65'],
     ];
     const stationHourly = ts(
-      STATION.map(([k, name, color]) => stack(name, data.stationHourly?.[k] ?? [], color)),
-      {hourly: true},
+      STATION.map(([k, name, color]) => stack(name, data.stationHourly[k] ?? [], color)),
+      {hourly: true, zoomStart: 0},
     );
-    (stationHourly as any).dataZoom[0].start = 0;
 
-    const oh = data.outageHourly ?? {eaf: [], pclf: [], uclf: [], oclf: []};
+    const oh = data.outageHourly;
     // Eskom's own published weekly EAF, windowed to the hourly chart's range —
     // a stepped reference against the derived hourly EAF.
-    const ohStart = oh.eaf?.[0]?.[0] ?? 0;
-    const officialEafWindow = (data.officialEafWeekly ?? []).filter((p) => p[0] >= ohStart);
+    const ohStart = oh.eaf[0]?.[0] ?? 0;
+    const officialEafWindow = data.officialEafWeekly.filter((p) => p[0] >= ohStart);
     const eafOutageHourly = ts(
       [
         stack('Unplanned (UCLF)', oh.uclf, '#e57373'),
@@ -782,6 +690,7 @@ export default function Dashboard(): ReactNode {
         unit: '%',
         decimals: 1,
         hourly: true,
+        zoomStart: 0,
         yAxis: {
           type: 'value', min: 0, max: 100,
           axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => v + '%'},
@@ -790,7 +699,6 @@ export default function Dashboard(): ReactNode {
         },
       },
     );
-    (eafOutageHourly as any).dataZoom[0].start = 0;
     // Available capacity (weekly avg) and peak demand (weekly max), MW, YoY.
     const capacityYoy = weeklyYoyOption(
       data.capacityByYear, data.eafWeeks, {curColor: '#2e9e4f', unit: 'MW'}, P, months);

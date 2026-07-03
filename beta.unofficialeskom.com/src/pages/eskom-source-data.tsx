@@ -1,7 +1,7 @@
 import type {ReactNode} from 'react';
-import {useEffect, useState} from 'react';
 import Layout from '@theme/Layout';
-import useBaseUrl from '@docusaurus/useBaseUrl';
+
+import {useDashboardData} from '../lib/dashboardData';
 import styles from './eskom-source-data.module.css';
 
 // Every graph on the Eskom Data Portal (https://www.eskom.co.za/dataportal/),
@@ -91,26 +91,10 @@ function fmtDate(ms: number | null): string {
 }
 
 export default function EskomSourceDataPage(): ReactNode {
-  const dataUrl = useBaseUrl('/dashboard-data.json');
-  const [catalog, setCatalog] = useState<Graph[]>([]);
-  const [reports, setReports] = useState<WeeklyReport[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    fetch(dataUrl)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive) return;
-        setCatalog((d && d.portalCatalog) || []);
-        setReports((d && d.weeklyReports) || []);
-        setLoaded(true);
-      })
-      .catch(() => alive && setLoaded(true));
-    return () => {
-      alive = false;
-    };
-  }, [dataUrl]);
+  const {data, err} = useDashboardData();
+  const catalog = (data?.portalCatalog ?? []) as Graph[];
+  const reports = (data?.weeklyReports ?? []) as WeeklyReport[];
+  const loaded = data != null || err != null;
 
   const scraped = catalog.filter((g) => g.rows).length;
 
