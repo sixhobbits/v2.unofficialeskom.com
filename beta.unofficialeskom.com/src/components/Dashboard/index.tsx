@@ -59,6 +59,7 @@ type DashboardData = {
   eafByYear: Record<string, Array<number | null>>;
   stationHourly: Record<string, Point[]>;
   outageHourly: {eaf: Point[]; pclf: Point[]; uclf: Point[]; oclf: Point[]};
+  officialEafWeekly?: Point[];
   yoyMonths: number[];
   genByYear: Record<string, Array<number | null>>;
   demandByYear: Record<string, Array<number | null>>;
@@ -763,6 +764,10 @@ export default function Dashboard(): ReactNode {
     (stationHourly as any).dataZoom[0].start = 0;
 
     const oh = data.outageHourly ?? {eaf: [], pclf: [], uclf: [], oclf: []};
+    // Eskom's own published weekly EAF, windowed to the hourly chart's range —
+    // a stepped reference against the derived hourly EAF.
+    const ohStart = oh.eaf?.[0]?.[0] ?? 0;
+    const officialEafWindow = (data.officialEafWeekly ?? []).filter((p) => p[0] >= ohStart);
     const eafOutageHourly = ts(
       [
         stack('Unplanned (UCLF)', oh.uclf, '#e57373'),
@@ -771,6 +776,7 @@ export default function Dashboard(): ReactNode {
         // Plain line, no lttb sampling — sampling here duplicated EAF in the
         // axis tooltip and isn't needed at hourly/3-month scale.
         {type: 'line', name: 'EAF', data: oh.eaf, symbol: 'none', showSymbol: false, large: true, animation: false, lineStyle: {width: 1.6, color: '#2e9e4f'}, itemStyle: {color: '#2e9e4f'}, z: 5},
+        {type: 'line', name: 'EAF (Eskom weekly)', data: officialEafWindow, step: 'start', symbol: 'none', showSymbol: false, animation: false, lineStyle: {width: 1.4, color: '#8e44ad', type: 'dashed'}, itemStyle: {color: '#8e44ad'}, z: 6},
       ],
       {
         unit: '%',
