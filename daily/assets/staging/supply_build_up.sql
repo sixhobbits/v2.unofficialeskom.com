@@ -74,6 +74,17 @@ custom_checks:
           END
           FROM staging.supply_build_up
       value: 1
+    # BLOCKING tripwire: actuals can never be in the future. Exists because
+    # bruin v0.11.663's DataFrame→DuckDB load scrambled row/column alignment
+    # (rows got other rows' timestamps, some years away — 2026-07-03 incident,
+    # charts plotted "generation" into 2027). A scrambled load must fail here,
+    # before dashboard.generate_beta can deploy it. Pin bruin v0.11.574.
+    - name: no_future_rows
+      description: no rows stamped more than 2 days in the future
+      query: |
+          SELECT COUNT(*) FROM staging.supply_build_up
+          WHERE timestamp > NOW() + INTERVAL 2 DAY
+      value: 0
 @bruin */
 
 -- Normalise series names consistently across all sources
