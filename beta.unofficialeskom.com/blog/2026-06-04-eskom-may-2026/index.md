@@ -1,6 +1,7 @@
 ---
 slug: eskom-may-2026
 title: "Eskom Data: May 2026"
+description: "May 2026 Eskom data: EAF recovers to 65.8% on seasonal maintenance and record-low demand, while Koeberg runs a unit at reduced capacity for the whole month."
 authors: [gareth]
 date: 2026-06-04
 ---

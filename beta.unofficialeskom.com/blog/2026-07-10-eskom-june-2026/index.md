@@ -1,6 +1,7 @@
 ---
 slug: eskom-june-2026
 title: "Eskom Data: June 2026"
+description: "June 2026 Eskom data: EAF recovers to 66.8% for a third month, Koeberg stuck at 645 MW, the lowest June demand on record, and diesel turbines fired hard for the 6pm winter peak."
 authors: [gareth]
 date: 2026-07-10
 ---
