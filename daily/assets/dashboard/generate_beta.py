@@ -16,7 +16,6 @@ depends:
     - staging.demand_capacity_hourly
     - staging.installed_capacity_monthly
     - staging.eaf_weekly_official
-    - staging.eaf_monthly
     - raw.portal_csv
     - raw.portal_powerbi
     - raw.uclf_oclf_trend_csv
@@ -111,11 +110,10 @@ CHART_SOURCES: dict[str, list[str]] = {
                                 "staging.weekly_status_outlook.likely_risk_mw",
                                 "staging.weekly_status_outlook.status"],
     # Eskom's OWN published EAF (vs our derived 100 - PCLF - UCLF - OCLF):
-    # weekly overlays the hourly EAF chart, monthly the Long-term page.
+    # weekly overlays the hourly EAF chart, monthly (a calendar-month mean of
+    # the same weekly series) the Long-term page.
     "chart-eaf-official":  ["staging.eaf_weekly_official.week_start",
-                            "staging.eaf_weekly_official.eaf_pct",
-                            "staging.eaf_monthly.month_start",
-                            "staging.eaf_monthly.eaf_pct"],
+                            "staging.eaf_weekly_official.eaf_pct"],
 }
 
 
@@ -589,11 +587,19 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
 
 
 def load_official_eaf(conn: duckdb.DuckDBPyConnection) -> dict:
-    """Eskom's OWN published EAF — weekly (2019-04 →) and monthly (2021-03 →).
+    """Eskom's OWN published EAF — weekly and monthly, both from the weekly
+    system-status reports (staging.eaf_weekly_official; PowerBI live scrape +
+    frozen metrics snapshot, freshest wins).
 
-    Shipped alongside the derived EAF so the dashboard can show both; the
-    derived number should track these closely (a staging custom check alarms
-    at >3 pp weekly drift).
+    The monthly series is a calendar-month mean of those weekly figures (each
+    week assigned to the month containing its midpoint). It used to come from
+    staging.eaf_monthly, but that fed off a frozen metrics snapshot / the
+    twice-a-year State-of-the-System presentation and lagged ~2 months — so
+    the "Eskom published" monthly line on the Long-term page sat months behind
+    the derived line for no good reason. The weekly reports carry the same
+    official EAF and land every week, so aggregating them keeps the monthly
+    line current. Shipped alongside the derived EAF so the dashboard shows
+    both; the two should track closely (a staging custom check alarms on drift).
     """
     weekly = [
         [_ts_ms(datetime(d.year, d.month, d.day, tzinfo=timezone.utc)), round(v, 1)]
@@ -602,12 +608,19 @@ def load_official_eaf(conn: duckdb.DuckDBPyConnection) -> dict:
         ).fetchall()
     ]
     monthly = [
-        [_ts_ms(m), round(v, 1)]
+        [_ts_ms(datetime(m.year, m.month, m.day, tzinfo=timezone.utc)), round(v, 1)]
         for m, v in conn.execute(
-            "SELECT month_start, eaf_pct FROM staging.eaf_monthly ORDER BY month_start"
+            """
+            SELECT date_trunc('month', week_start + INTERVAL 3 DAY)::DATE AS month_start,
+                   AVG(eaf_pct) AS eaf_pct
+            FROM staging.eaf_weekly_official
+            WHERE eaf_pct IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1
+            """
         ).fetchall()
     ]
-    print(f"  official EAF: {len(weekly)} weeks, {len(monthly)} months")
+    print(f"  official EAF: {len(weekly)} weeks, {len(monthly)} months (monthly = weekly agg)")
     return {"weekly": weekly, "monthly": monthly}
 
 
