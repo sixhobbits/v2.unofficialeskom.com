@@ -6,13 +6,6 @@ authors: [gareth]
 date: 2026-07-10
 ---
 
-{/*
-NOTES FOR GARETH (not rendered):
-- All figures from the refreshed warehouse (June 2026 complete; July excluded).
-- Chart images are live screenshots from the Long-term tab (re-shoot if data updates).
-- Official EAF for June not yet published by Eskom at time of writing — omitted.
-*/}
-
 June extends May's shallow recovery by another notch — but the same cracks are all still there. The fleet is a little more available, mostly because winter maintenance is winding down and demand keeps falling. Koeberg is now into its second full month running a unit at reduced capacity with no public word, and June demand was the lowest on record for the month.
 
 June 2026 saw:
