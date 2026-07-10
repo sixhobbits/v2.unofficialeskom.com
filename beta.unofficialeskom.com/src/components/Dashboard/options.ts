@@ -63,6 +63,20 @@ export function timeSeriesOption(
   const hourly = !!opts.hourly;
   const monthly = !!opts.monthly;
   const isMobile = !!opts.isMobile;
+  // Default the zoom window to the last 30 days (= the "1M" preset) for the
+  // daily/hourly charts, by value off the newest timestamp across all series.
+  // Skip for monthly charts (Long-term page) — 30 days there is ~1 point, so
+  // those keep the percent-based default (opts.zoomStart, usually full history).
+  let _maxTs = -Infinity;
+  if (!monthly) {
+    for (const s of series) {
+      const d = (s as any).data;
+      const last = Array.isArray(d) && d.length ? d[d.length - 1] : null;
+      const t = Array.isArray(last) ? last[0] : null;
+      if (typeof t === 'number' && t > _maxTs) _maxTs = t;
+    }
+  }
+  const _use1M = !monthly && isFinite(_maxTs);
   const fmtTooltip = (params: any[]) => {
     if (!params || !params.length) return '';
     const lines = params.map((p) => {
@@ -168,10 +182,11 @@ export function timeSeriesOption(
     dataZoom: [
       {
         type: 'slider',
-        // Default window opens on the last 25% of history; pass zoomStart to
-        // open wider/narrower instead of mutating the returned option.
-        start: opts.zoomStart ?? 75,
-        end: 100,
+        // Daily/hourly charts open on the last 30 days (= 1M preset), by value.
+        // Monthly charts fall back to the percent-based zoomStart (full history).
+        ...(_use1M
+          ? {startValue: _maxTs - 30 * 86_400_000, endValue: _maxTs}
+          : {start: opts.zoomStart ?? 75, end: 100}),
         // The slider always spans the full history, so on a phone one pixel of
         // handle travel is ~a week — a small window is impossible to grab.
         // Don't let the handles collapse past a day; fine selection comes from
