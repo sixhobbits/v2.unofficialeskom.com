@@ -6,13 +6,6 @@ authors: [gareth]
 date: 2026-06-04
 ---
 
-{/*
-NOTES FOR GARETH (not rendered):
-- All figures from the refreshed warehouse (May 2026 complete; June excluded).
-- Chart images are live screenshots from the Monthly tab (re-shoot if data updates).
-- Add the "Sonnet analysis" section like April if you want.
-*/}
-
 After April's wobble, May 2026 looks like a partial recovery on paper — but it's a shallow one, propped up by a still-broken Koeberg and the lowest May demand on record.
 
 May 2026 saw:
