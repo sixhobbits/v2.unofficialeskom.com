@@ -458,7 +458,7 @@ export default function Dashboard(): ReactNode {
     const reductionChart = (avg: Point[], max: Point[], color: string) =>
       ts([
         {...LINE_BASE, name: 'Daily avg', data: avg, lineStyle: {width: 1.4, color}, areaStyle: {color, opacity: 0.12}, itemStyle: {color}},
-        {...LINE_BASE, name: 'Daily max', data: max, lineStyle: {width: 1, color, type: 'dashed'}, itemStyle: {color}},
+        {...LINE_BASE, name: 'Daily max (dashed)', data: max, lineStyle: {width: 1, color, type: 'dashed'}, itemStyle: {color}},
       ], {unit: 'MW', decimals: 1});
     const iosChart = reductionChart(data.iosAvg, data.iosMax, '#5e35b1');
     const mlrChart = reductionChart(data.mlrAvg, data.mlrMax, '#ef6c00');
@@ -813,8 +813,8 @@ export default function Dashboard(): ReactNode {
         <ChartCard title="Outages: planned / unplanned / other (7-day avg %)" option={charts.outagesYoy} />
       </div>
       <div className={styles.chartPair}>
-        <ChartCard title="Station build-up — hourly generation mix (last 3 months)" option={charts.stationHourly} />
-        <ChartCard title="EAF &amp; outages — hourly (last 3 months)" option={charts.eafOutageHourly} />
+        <ChartCard title="Station build-up — hourly generation mix" option={charts.stationHourly} />
+        <ChartCard title="EAF &amp; outages — hourly" option={charts.eafOutageHourly} />
       </div>
 
       <h2 className={styles.sectionTitle}>Generation</h2>
