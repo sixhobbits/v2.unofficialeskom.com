@@ -5,7 +5,7 @@ import {useColorMode} from '@docusaurus/theme-common';
 import clsx from 'clsx';
 
 import {useDashboardData, useIsMobile, type Point} from '../../lib/dashboardData';
-import {PALETTES, timeSeriesOption, type Palette} from './options';
+import {PALETTES, timeSeriesOption, calendarTicks, type Palette} from './options';
 import {Gauge} from './Gauge';
 import styles from './styles.module.css';
 
@@ -47,6 +47,24 @@ export function ChartCard({title, option}: {title: string; option: any}) {
   // category YoY charts get just the title.
   const hasTimeZoom = option?.xAxis?.type === 'time' && option?.dataZoom;
 
+  // Data extent across all series. Window end = newest timestamp, not "now" —
+  // some feeds lag a few days and an empty window would look broken.
+  const extent = () => {
+    let minTs = Infinity;
+    let maxTs = -Infinity;
+    for (const s of option.series ?? []) {
+      const d = s?.data;
+      if (!Array.isArray(d) || !d.length) continue;
+      const first = d[0];
+      const last = d[d.length - 1];
+      const tf = Array.isArray(first) ? first[0] : null;
+      const tl = Array.isArray(last) ? last[0] : null;
+      if (typeof tf === 'number' && tf < minTs) minTs = tf;
+      if (typeof tl === 'number' && tl > maxTs) maxTs = tl;
+    }
+    return [minTs, maxTs] as const;
+  };
+
   const setRange = (days: number | null) => {
     const inst = chartRef.current?.getEchartsInstance();
     if (!inst) return;
@@ -54,17 +72,25 @@ export function ChartCard({title, option}: {title: string; option: any}) {
       inst.dispatchAction({type: 'dataZoom', start: 0, end: 100});
       return;
     }
-    // Window end = newest timestamp across all series, not "now" — some feeds
-    // lag a few days and an empty window would look broken.
-    let maxTs = -Infinity;
-    for (const s of option.series ?? []) {
-      const d = s?.data;
-      const last = Array.isArray(d) && d.length ? d[d.length - 1] : null;
-      const t = Array.isArray(last) ? last[0] : null;
-      if (typeof t === 'number' && t > maxTs) maxTs = t;
-    }
+    const [, maxTs] = extent();
     if (!isFinite(maxTs)) return;
     inst.dispatchAction({type: 'dataZoom', startValue: maxTs - days * 86_400_000, endValue: maxTs});
+  };
+
+  // Keep the x-axis's deterministic tick positions (axisLabel.customValues, see
+  // calendarTicks in options.ts) in sync with the visible window on every zoom.
+  const onDataZoom = () => {
+    const inst = chartRef.current?.getEchartsInstance();
+    if (!inst || !hasTimeZoom) return;
+    const dz: any = (inst.getOption() as any)?.dataZoom?.[0];
+    if (!dz) return;
+    const [minTs, maxTs] = extent();
+    if (!isFinite(minTs) || !isFinite(maxTs)) return;
+    // After interactions ECharts usually resolves startValue/endValue; fall
+    // back to percent-based start/end against the data extent.
+    const s = dz.startValue ?? minTs + ((dz.start ?? 0) / 100) * (maxTs - minTs);
+    const e = dz.endValue ?? minTs + ((dz.end ?? 100) / 100) * (maxTs - minTs);
+    inst.setOption({xAxis: {axisLabel: {customValues: calendarTicks(s, e)}}});
   };
 
   return (
@@ -90,6 +116,7 @@ export function ChartCard({title, option}: {title: string; option: any}) {
         option={option}
         notMerge
         lazyUpdate
+        onEvents={{datazoom: onDataZoom}}
         style={{height: 320, width: '100%'}}
         opts={{renderer: 'canvas'}}
       />
@@ -657,9 +684,14 @@ export default function Dashboard(): ReactNode {
 
     // Hourly detail for the last ~3 months (no lttb sampling — it misaligns
     // stacked areas). Both open on the full 3-month window.
+    // NOTE: no `large: true` (unsupported with stack) and no lttb sampling
+    // (misaligns stacked areas). The "blue slits to zero" artifact was neither:
+    // ECharts stacks NEGATIVE points below the axis, so tiny negative
+    // pumped-storage hours (pumping) collapsed the band — the generator now
+    // clamps this stack's values at 0 (see load_station_hourly).
     const stack = (name: string, d: Point[], color: string) => ({
       type: 'line', name, data: d, stack: 'h', symbol: 'none', showSymbol: false,
-      large: true, animation: false, areaStyle: {color, opacity: 0.85}, lineStyle: {width: 0}, itemStyle: {color},
+      animation: false, areaStyle: {color, opacity: 0.85}, lineStyle: {width: 0}, itemStyle: {color},
     });
     const STATION: Array<[string, string, string]> = [
       ['coal', 'Coal', '#6d4c41'], ['nuclear', 'Nuclear', '#ab47bc'], ['ocgt', 'OCGT (diesel/gas)', '#ef6c00'],
