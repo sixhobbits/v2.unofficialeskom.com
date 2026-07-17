@@ -512,7 +512,12 @@ def load_station_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict
         ts = _ts_ms(r[0])
         for i, k in enumerate(keys):
             v = r[i + 1]
-            out[k].append([ts, round(v, 1) if v is not None else None])
+            # Clamp at 0: this is a generation-mix stack, and ECharts stacks a
+            # negative point below zero, so even a -0.3 MW pumped-storage hour
+            # (pumping) or negative import (exporting) renders as a full-height
+            # slit down to the axis. Pumping/export detail lives in the
+            # dedicated pumped-storage and trade charts, which keep raw values.
+            out[k].append([ts, round(max(v, 0.0), 1) if v is not None else None])
     print(f"  station hourly: {len(rows)} hours x {len(keys)} sources")
     return out
 
