@@ -501,13 +501,15 @@ export default function Dashboard(): ReactNode {
       ],
       {});
 
+    // Monthly bars — open on the full history (monthly: true skips the 1M
+    // default window, zoomStart 0 spans everything).
     const rooftopPv = ts(
       (data.rooftopProvinces || []).map((prov) => ({
         type: 'bar', stack: 'rooftop', name: prov, data: data.rooftopSeries[prov] || [],
         animation: false, large: true,
         itemStyle: {color: rooftopColorByProv[prov]},
       })),
-      {unit: 'MW', decimals: 1});
+      {unit: 'MW', decimals: 1, monthly: true, zoomStart: 0});
 
     const rooftopPvPerHh = ts(
       (data.rooftopProvincesPerHh || []).map((prov) => ({
@@ -518,6 +520,8 @@ export default function Dashboard(): ReactNode {
       {
         unit: 'W/household',
         decimals: 1,
+        monthly: true,
+        zoomStart: 0,
         yAxis: {
           type: 'value',
           axisLabel: {fontSize: 10, color: P.axisLabel, formatter: (v: number) => v.toLocaleString('en-ZA') + ' W/hh'},
@@ -702,6 +706,13 @@ export default function Dashboard(): ReactNode {
       STATION.map(([k, name, color]) => stack(name, data.stationHourly[k] ?? [], color)),
       {hourly: true, zoomStart: 0},
     );
+    // Same mix without coal (which swamps the y-axis) and imports (not
+    // generation) — makes the smaller sources readable.
+    const nonThermalHourly = ts(
+      STATION.filter(([k]) => k !== 'coal' && k !== 'imports')
+        .map(([k, name, color]) => stack(name, data.stationHourly[k] ?? [], color)),
+      {hourly: true, zoomStart: 0},
+    );
 
     const oh = data.outageHourly;
     // Eskom's own published weekly EAF, windowed to the hourly chart's range —
@@ -756,7 +767,7 @@ export default function Dashboard(): ReactNode {
       ],
       {});
 
-    return {clf, iosChart, mlrChart, ilsChart, totalReductionChart, pumpedStorage, eafYoy, outagesYoy, stationHourly, eafOutageHourly, capacityYoy, peakDemandYoy, genYoy, demandYoy, renewables, rooftopPv, rooftopPvPerHh, thermal, nuclear, ocgt, ocgtHourly, genDemand, uclfOclfYoy, trade};
+    return {clf, iosChart, mlrChart, ilsChart, totalReductionChart, pumpedStorage, eafYoy, outagesYoy, stationHourly, nonThermalHourly, eafOutageHourly, capacityYoy, peakDemandYoy, genYoy, demandYoy, renewables, rooftopPv, rooftopPvPerHh, thermal, nuclear, ocgt, ocgtHourly, genDemand, uclfOclfYoy, trade};
   }, [data, P, rooftopColorByProv, isMobile]);
 
   if (err) return <div className={styles.loading}>Failed to load data: {err}</div>;
@@ -850,6 +861,9 @@ export default function Dashboard(): ReactNode {
       </div>
 
       <h2 className={styles.sectionTitle}>Generation</h2>
+      <div className={styles.chartGrid}>
+        <ChartCard title="Non-thermal generation — hourly mix (excl. coal &amp; imports)" option={charts.nonThermalHourly} />
+      </div>
       <div className={styles.chartPair}>
         <ChartCard title="Coal (min / avg / max)" option={charts.thermal} />
         <ChartCard title="Nuclear (hourly avg)" option={charts.nuclear} />
