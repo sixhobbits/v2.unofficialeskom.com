@@ -11,12 +11,12 @@ description: |
       1. raw.esk_bulk_content (hourly, lags weeks — rebuilt monthly)
          - publishes Total PCLF / UCLF / OCLF in MW, all hourly.
          - highest fidelity; preferred wherever it has data.
-      2. raw.uclf_oclf_trend_csv (hourly, ~1 day behind)
+      2. staging.uclf_oclf_trend_hourly (hourly CSV with PowerBI backup)
          - publishes combined UCLF+OCLF only, in MW. No PCLF.
          - used to refine UCLF for the recent tail (UCLF = combined - OCLF_weekly).
       3. raw.weekly_capacity_breakdown_powerbi (weekly, ~1 week behind)
          - publishes Weekly EAF / PCLF / UCLF / OCLF as percentages.
-         - step-held forward to backfill PCLF / OCLF when only the trend csv has
+         - step-held forward to backfill PCLF / OCLF when only the CSV/PowerBI trend has
            UCLF data, and to fill the freshest end where neither hourly source
            has anything.
 
@@ -35,7 +35,7 @@ materialization:
 
 depends:
     - raw.esk_bulk_content
-    - raw.uclf_oclf_trend_csv
+    - staging.uclf_oclf_trend_hourly
     - raw.weekly_capacity_breakdown_powerbi
     - staging.installed_capacity_monthly
 
@@ -65,7 +65,7 @@ columns:
       type: VARCHAR
 
 custom_checks:
-    # This table's tail rides the trend CSV (~1 day behind), so unlike the
+    # This table's tail rides the CSV/PowerBI trend (~1 day behind), so unlike the
     # bulk-only hourly table a tight threshold is correct here.
     - name: freshness_7d
       blocking: false
@@ -97,10 +97,12 @@ bulk_daily AS (
 trend_daily AS (
     SELECT
         timestamp::DATE AS day,
-        AVG(value) AS uclf_oclf_combined_mw,
+        AVG(uclf_oclf_mw) AS uclf_oclf_combined_mw,
+        CASE WHEN COUNT(*) FILTER (WHERE source = 'trend_powerbi') > 0
+             THEN 'trend_powerbi' ELSE 'trend_csv' END AS trend_src,
         COUNT(*) AS hours_covered
-    FROM raw.uclf_oclf_trend_csv
-    WHERE series = 'Hourly UCLF+OCLF' AND timestamp IS NOT NULL
+    FROM staging.uclf_oclf_trend_hourly
+    WHERE timestamp IS NOT NULL
     GROUP BY 1
     HAVING COUNT(*) >= 20  -- drop partial days (latest partial hour is incomplete)
 ),
@@ -178,7 +180,7 @@ merged AS (
         END AS uclf_pct,
         CASE
             WHEN b.uclf_mw IS NOT NULL THEN 'bulk'
-            WHEN t.uclf_oclf_combined_mw IS NOT NULL THEN 'trend_csv'
+            WHEN t.uclf_oclf_combined_mw IS NOT NULL THEN t.trend_src
             WHEN w.w_uclf_pct IS NOT NULL THEN 'weekly'
             ELSE NULL
         END AS uclf_src

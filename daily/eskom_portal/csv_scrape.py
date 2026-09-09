@@ -194,10 +194,51 @@ def parse_ocgt_fy_csv(text: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _month_candidates(url: str, today: dt.date) -> list[str]:
+    """Bounded recovery for stale WordPress links: current and previous month.
+
+    Keep host, filename and query unchanged; never crawl arbitrary paths.
+    Remove this workaround once portal links reliably follow monthly uploads.
+    """
+    parts = urllib.parse.urlsplit(url)
+    match = re.search(r"/wp-content/uploads/(\d{4})/(\d{2})/", parts.path)
+    if not match:
+        return []
+    current = today.replace(day=1)
+    previous = (current - dt.timedelta(days=1)).replace(day=1)
+    linked_month = (int(match[1]), int(match[2]))
+    candidates = []
+    for month in (current, previous):
+        if (month.year, month.month) <= linked_month:
+            continue
+        path = (parts.path[:match.start()] +
+                f"/wp-content/uploads/{month:%Y/%m}/" + parts.path[match.end():])
+        candidates.append(urllib.parse.urlunsplit(parts._replace(path=path)))
+    return candidates
+
+
+def _fetch_csv(url: str) -> dict[str, Any]:
+    raw, _final, status, headers = get_meta(url)
+    text = _decode(raw)
+    error = (f"CSV HTTP {status}" if status != 200 else
+             "CSV link returned HTML" if _looks_like_html(text) else None)
+    return {
+        "csv_url": url, "http_status": status,
+        "etag": headers.get("etag"), "last_modified": headers.get("last-modified"),
+        "content_length": headers.get("content-length"),
+        "content_text": text[:5_000_000], "error": error,
+        "rows": [] if error else parse_csv_text(text),
+    }
+
+
+def _latest(rows: list[dict]) -> dt.datetime | None:
+    return max((r["timestamp"] for r in rows if r["timestamp"] is not None), default=None)
+
+
 # ---------- main entry point ----------
 
 def scrape_csv(page_url: str) -> dict[str, Any]:
-    """Fetch the graph page, find the first CSV link, fetch + parse it.
+    """Fetch the linked CSV; recover stale links via newer monthly upload paths.
 
     Returns:
       {
@@ -239,23 +280,28 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
         result["error"] = "no CSV link on graph page"
         return result
 
-    csv_url = links[0]
-    result["csv_url"] = csv_url
-
-    raw, _f, http_status, hdrs = get_meta(csv_url)
-    result["http_status"] = http_status
-    result["etag"] = hdrs.get("etag")
-    result["last_modified"] = hdrs.get("last-modified")
-    result["content_length"] = hdrs.get("content-length")
-    text = _decode(raw)
-    result["content_text"] = text[:5_000_000]  # cap for very large CSVs
-
-    if http_status != 200:
-        result["error"] = f"CSV HTTP {http_status}"
-        return result
-    if _looks_like_html(text):
-        result["error"] = "CSV link returned HTML"
+    result.update(_fetch_csv(links[0]))
+    latest = _latest(result["rows"])
+    # Data timestamps, not HTTP Last-Modified, determine whether a file is stale.
+    # Eskom regularly republishes unchanged CSV bodies with fresh HTTP headers.
+    if latest is not None and latest >= scraped_at - dt.timedelta(days=7):
         return result
 
-    result["rows"] = parse_csv_text(text)
+    expected_series = {r["series"] for r in result["rows"]}
+    for url in _month_candidates(links[0], scraped_at.date()):
+        try:
+            candidate = _fetch_csv(url)
+        except OSError:
+            # An optional monthly probe must not discard a usable linked CSV.
+            continue
+        newest = _latest(candidate["rows"])
+        series = {r["series"] for r in candidate["rows"]}
+        if (candidate["error"] or newest is None or
+                (expected_series and not expected_series.issubset(series))):
+            continue
+        if latest is None or newest > latest:
+            result.update(candidate)
+            latest = newest
+        if latest >= scraped_at - dt.timedelta(days=7):
+            break
     return result

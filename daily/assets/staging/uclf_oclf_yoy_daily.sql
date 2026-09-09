@@ -10,28 +10,15 @@ description: |
     the recent tail), keyed by (year, mmdd) for year-on-year comparison
     plotting. Long-form; the dashboard pivots into per-year series.
 
-    Unions three sources of the combined Hourly UCLF+OCLF (MW) series and
-    prefers the freshest per hour:
-
-      1. raw.uclf_oclf_trend_csv     (priority 1) — CSV download off the portal,
-         rolling ~30-day window, ~1 day behind. Authoritative when present.
-      2. raw.uclf_oclf_trend_powerbi (priority 2) — embedded PowerBI iframe,
-         rolling 14-day window, ~1 day behind. Agrees with the CSV to the
-         decimal where they overlap; backs it up if the CSV link breaks.
-      3. raw.eskom_metrics_uclf_oclf_hourly (priority 3) — static snapshot
-         sqlite carrying the full back-history (2022 →), frozen ~2-3 weeks
-         behind. Supplies every historical year the live feeds don't reach.
-
-    Before the CSV/PowerBI scrapers were wired in, this table read source 3
-    alone and the latest year flat-lined wherever that snapshot stopped.
+    Uses the shared CSV/PowerBI hourly series, backed by the static historical
+    SQLite snapshot for hours neither live source covers.
 
 materialization:
     type: table
     strategy: create+replace
 
 depends:
-    - raw.uclf_oclf_trend_csv
-    - raw.uclf_oclf_trend_powerbi
+    - staging.uclf_oclf_trend_hourly
     - raw.eskom_metrics_uclf_oclf_hourly
     - staging.installed_capacity_monthly
 
@@ -51,13 +38,8 @@ columns:
 @bruin */
 
 WITH unified AS (
-    SELECT timestamp AS ts, value AS uclf_oclf_mw, 1 AS priority
-    FROM raw.uclf_oclf_trend_csv
-    WHERE series = 'Hourly UCLF+OCLF' AND value IS NOT NULL AND timestamp IS NOT NULL
-    UNION ALL
-    SELECT timestamp AS ts, value AS uclf_oclf_mw, 2 AS priority
-    FROM raw.uclf_oclf_trend_powerbi
-    WHERE series = 'Hourly UCLF+OCLF' AND value IS NOT NULL AND timestamp IS NOT NULL
+    SELECT timestamp AS ts, uclf_oclf_mw, 1 AS priority
+    FROM staging.uclf_oclf_trend_hourly
     UNION ALL
     SELECT timestamp AS ts, uclf_oclf_mw, 3 AS priority
     FROM raw.eskom_metrics_uclf_oclf_hourly

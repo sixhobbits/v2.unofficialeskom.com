@@ -18,7 +18,7 @@ depends:
     - staging.eaf_weekly_official
     - raw.portal_csv
     - raw.portal_powerbi
-    - raw.uclf_oclf_trend_csv
+    - staging.uclf_oclf_trend_hourly
     - raw.esk_bulk_content
 
 description: |
@@ -85,7 +85,8 @@ CHART_SOURCES: dict[str, list[str]] = {
     "chart-gen-demand-yoy": ["staging.supply_build_up.thermal_gen_excl_pumping_and_sco",
                              "staging.outage_metrics_hourly.residual_demand_mw"],
     "chart-station-hourly": [f"staging.supply_build_up.{c}" for c in STAGING_COL_MAP],
-    "chart-eaf-outage-hourly": ["staging.outage_metrics_hourly.eaf_pct",
+    "chart-eaf-outage-hourly": ["staging.uclf_oclf_trend_hourly.uclf_oclf_mw",
+                                "staging.outage_metrics_hourly.eaf_pct",
                                 "staging.outage_metrics_hourly.pclf_pct",
                                 "staging.outage_metrics_hourly.uclf_pct",
                                 "staging.outage_metrics_hourly.oclf_pct"],
@@ -527,7 +528,7 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
 
     The bulk feed (staging.outage_metrics_hourly) lags weeks, so the most
     recent hours — exactly the ones that explain a dip in the EAF headline — are
-    missing. We append those from the hourly UCLF+OCLF trend CSV, taking PCLF
+    missing. We append those from the hourly UCLF+OCLF CSV/PowerBI series, taking PCLF
     and OCLF from the CURRENT weekly capacity-breakdown report (step-held per
     day; PCLF only publishes weekly) and deriving EAF. Holding PCLF at the last
     bulk value instead is wrong whenever the bulk feed is stale: on 2026-07-02
@@ -551,14 +552,14 @@ def load_outage_hourly(conn: duckdb.DuckDBPyConnection, days: int = 92) -> dict:
         out["oclf"].append([t, round(o, 1) if o is not None else None])
         last_ts, last_pclf, last_oclf = ts, p, o
 
-    # Recent tail from the trend CSV (hourly UCLF+OCLF in MW), where the bulk
+    # Recent tail from the shared CSV/PowerBI series (hourly UCLF+OCLF in MW), where the bulk
     # feed hasn't reached yet. PCLF/OCLF step-held from the weekly reports
     # (fallback: last bulk value), MW→% via the latest known installed capacity.
     tail_n = 0
     if last_ts is not None and last_pclf is not None:
         tail = conn.execute(
-            "SELECT timestamp, AVG(value) FROM raw.uclf_oclf_trend_csv "
-            "WHERE series = 'Hourly UCLF+OCLF' AND timestamp > ? GROUP BY 1 ORDER BY 1",
+            "SELECT timestamp, uclf_oclf_mw FROM staging.uclf_oclf_trend_hourly "
+            "WHERE timestamp > ? ORDER BY timestamp",
             [last_ts],
         ).fetchall()
         cap_mw = conn.execute(

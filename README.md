@@ -28,3 +28,23 @@ cd ../beta.unofficialeskom.com && yarn build
 ```
 
 `--workers 1` is required (DuckDB is single-writer).
+
+## Stale CSV links and outage coverage
+
+`eskom_portal.csv_scrape.scrape_csv` compares parsed data timestamps with the
+current date. If the linked CSV is more than seven days behind (or has no
+usable dated rows), it checks the same filename in the current and previous
+month's WordPress uploads directories, newer than the linked directory. It
+accepts only a valid CSV with the expected series and a later data timestamp;
+the chosen URL, body and HTTP validators stay together in the scrape record.
+Failed, HTML, unrelated or older candidates never replace usable linked data.
+This bounded recovery handles portal pages that keep linking last month's file;
+it can be removed when Eskom reliably updates those links.
+
+`staging.uclf_oclf_trend_hourly` selects CSV values per hour and fills missing
+hours from the existing daily PowerBI scrape. Daily outage metrics, the hourly
+outage chart tail and year-on-year outages all consume that shared series.
+Bulk data still takes precedence for the full outage breakdown; recent PCLF
+and OCLF still come from weekly reports because the trend reports only their
+combined unplanned/other loss total. Hourly runs reuse the latest stored PowerBI
+scrape; the normal full daily run refreshes PowerBI.
