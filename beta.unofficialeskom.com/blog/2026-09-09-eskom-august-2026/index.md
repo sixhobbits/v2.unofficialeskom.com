@@ -48,7 +48,11 @@ From **01:00 on 27 August through 02:00 on 31 August**, the export reports **98 
 ![Hourly nuclear readings during August, highlighting the negative values from 27–31 August](./img-nuclear.png)
 *The late-month decline reduced the monthly average even though output had stayed near 650 MW for most of August.*
 
-The export contains no explanation for those negative readings, so their cause needs separate confirmation. The chart and monthly average preserve the signed values as published. What the data clearly shows is that the already-low nuclear contribution weakened further in August, before a partial recovery on the final day.
+Eskom explained the initial reduction in its [21 August update](https://x.com/Eskom_SA/status/2090770499613671431?s=20): marine material had built up at the seawater intake, causing a cooling pump to switch off automatically. Unit 1 was reduced to 50% power as a precaution, while Unit 2 was already offline for planned maintenance.
+
+In its [31 August update](https://x.com/Eskom_SA/status/2094306306756604382?s=20), Eskom said Unit 1 had subsequently been taken offline following a turbine trip and returned to service at **03:00 that morning**. That return time matches the first positive reading in the export. Eskom said nuclear safety was maintained throughout.
+
+The chart and monthly average preserve the signed values as published. Nuclear output remained below its early-August level at month-end, despite the return to service.
 
 ## Demand set another August low
 
