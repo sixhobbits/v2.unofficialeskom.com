@@ -219,3 +219,19 @@ def test_csv_datasets_expand_multi_file_pages():
         "RE_Maximum_Contribution.csv", "RE_Maximum_Peak_Difference.csv"]
     assert re_ds[0]["slug"] == "renewables-performance/renewable-statistics"  # history keeps its slug
     assert len(ds) == len(PORTAL_GRAPHS) + 3
+
+
+def test_dead_link_recovers_undated_file_from_newer_month(monkeypatch):
+    import datetime
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    old_month = (today.replace(day=1) - datetime.timedelta(days=95)).replace(day=1)
+    old = f"https://x/wp-content/uploads/{old_month:%Y/%m}/RE_Maximum_Contribution.csv"
+    current = cs._month_candidates(old, today)[0]
+    monkeypatch.setattr(cs, "get", lambda url: (f'<a href="{old}">CSV</a>'.encode(), url, 200))
+    undated = b"Fin_Year,Value\nAll Time,580.4\n"  # year labels only: no parsable dates
+    monkeypatch.setattr(cs, "get_meta", lambda url: (undated, url, 200, {"etag": "now"})
+                        if url == current else (b"<html>404</html>", url, 404, {}))
+    r = cs.scrape_csv("https://x/renewable-statistics/", "RE_Maximum_Contribution.csv")
+    assert r["error"] is None and r["http_status"] == 200
+    assert r["csv_url"] == current and r["etag"] == "now"
+    assert r["rows"] == [{"timestamp": None, "series": "Value", "value": 580.4}]

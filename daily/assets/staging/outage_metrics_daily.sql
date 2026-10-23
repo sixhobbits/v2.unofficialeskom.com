@@ -81,11 +81,9 @@ custom_checks:
           Derived weekly EAF (avg of staging.outage_metrics_daily over the same
           Mon-anchored week) stays within 5 pp of Eskom's published weekly EAF
           on the trailing 8 published weeks. Non-blocking drift alarm.
-          Known bias, don't chase below 5 pp: on tail weeks where UCLF comes
-          from the hourly trend CSV, the derived EAF runs ~2-3.5 pp LOW —
-          Eskom's trend CSV (UCLF+OCLF MW) reads hotter than the UCLF in their
-          own weekly report (observed 2026-06: derived 65.4 vs official 69.0).
-          Weeks fully covered by the bulk feed agree to ~0.2 pp.
+          Since the official weeks became coherent snapshots (2026-10-23) the
+          trailing weeks agree within ~0.1 pp. The earlier "~2-3.5 pp low"
+          gap was the official side mixing components across revisions.
       query: |
           WITH derived AS (
               SELECT date_trunc('week', day)::DATE AS week_start,

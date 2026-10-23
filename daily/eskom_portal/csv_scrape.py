@@ -300,6 +300,7 @@ def scrape_csv(page_url: str, csv_file: str | None = None) -> dict[str, Any]:
         return result
 
     expected_series = {r["series"] for r in result["rows"]}
+    linked_usable = result["error"] is None and bool(result["rows"])
     for url in _month_candidates(links[0], scraped_at.date()):
         try:
             candidate = _fetch_csv(url)
@@ -308,12 +309,20 @@ def scrape_csv(page_url: str, csv_file: str | None = None) -> dict[str, Any]:
             continue
         newest = _latest(candidate["rows"])
         series = {r["series"] for r in candidate["rows"]}
-        if (candidate["error"] or newest is None or
+        if (candidate["error"] or not candidate["rows"] or
                 (expected_series and not expected_series.issubset(series))):
             continue
-        if latest is None or newest > latest:
+        if not linked_usable:
+            # The linked file is gone (404) or empty: the newest-month usable
+            # file replaces it, dated or not (some files carry only year labels).
             result.update(candidate)
             latest = newest
-        if latest >= scraped_at - dt.timedelta(days=7):
+            linked_usable = True
+            if newest is None:
+                break
+        elif newest is not None and (latest is None or newest > latest):
+            result.update(candidate)
+            latest = newest
+        if latest is not None and latest >= scraped_at - dt.timedelta(days=7):
             break
     return result
