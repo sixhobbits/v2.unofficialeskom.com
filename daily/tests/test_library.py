@@ -160,3 +160,62 @@ def test_month_probe_timeout_keeps_linked_csv(monkeypatch):
         return GOOD_CSV, url, 200, {}
     monkeypatch.setattr(cs, 'get_meta', get_meta)
     assert cs.scrape_csv('https://x/graph')['content_text'] == GOOD_CSV.decode()
+
+
+# ---------- pages that link several CSV files ----------
+
+RE_PAGE = b"".join(
+    f'<a href="https://x/wp-content/uploads/2026/07/{f}">CSV</a>'.encode()
+    for f in ("RE_Current_Installed_Capacity.csv", "RE_Maximum_Contribution.csv",
+              "RE_Maximum_Peak_Difference.csv", "RE_Annual_Energy_Contribution.csv")
+)
+
+
+def test_csv_file_selects_its_own_link(monkeypatch):
+    monkeypatch.setattr(cs, "get", lambda url: (RE_PAGE, url, 200))
+    monkeypatch.setattr(cs, "get_meta", lambda url: (b"Name,Value\nWind,1\n", url, 200, {"etag": url}))
+    for f in ("RE_Current_Installed_Capacity.csv", "re_maximum_peak_difference.csv",
+              "RE_Annual_Energy_Contribution.csv"):
+        r = cs.scrape_csv("https://x/renewable-statistics/", f)
+        assert r["csv_url"].lower().endswith("/2026/07/" + f.lower())
+        assert r["etag"] == r["csv_url"]  # validators belong to that file's response
+    assert cs.scrape_csv("https://x/renewable-statistics/")["csv_url"].endswith(
+        "RE_Current_Installed_Capacity.csv")  # no csv_file: first link, as before
+
+
+def test_missing_sibling_link_errors_only_that_file(monkeypatch):
+    monkeypatch.setattr(cs, "get", lambda url: (RE_PAGE, url, 200))
+    monkeypatch.setattr(cs, "get_meta", lambda url: (b"Name,Value\nWind,1\n", url, 200, {}))
+    r = cs.scrape_csv("https://x/renewable-statistics/", "RE_Gone.csv")
+    assert r["error"] == "no RE_Gone.csv link on graph page"
+    assert r["csv_url"] is None
+
+
+def test_csv_file_follows_monthly_path_change(monkeypatch):
+    import datetime
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    old_month = (today.replace(day=1) - datetime.timedelta(days=40)).replace(day=1)
+    page = b"".join(f'<a href="https://x/wp-content/uploads/{old_month:%Y/%m}/{f}">CSV</a>'.encode()
+                    for f in ("A.csv", "B.csv"))
+    monkeypatch.setattr(cs, "get", lambda url: (page, url, 200))
+
+    def get_meta(url):
+        day = old_month if f"/{old_month:%Y/%m}/" in url else today
+        return f"Date,Value\n{day},1\n".encode(), url, 200, {}
+    monkeypatch.setattr(cs, "get_meta", get_meta)
+    r = cs.scrape_csv("https://x/graph", "B.csv")
+    assert r["csv_url"] == cs._month_candidates(
+        f"https://x/wp-content/uploads/{old_month:%Y/%m}/B.csv", today)[0]
+
+
+def test_csv_datasets_expand_multi_file_pages():
+    from eskom_portal.catalog import PORTAL_GRAPHS, csv_datasets
+    ds = csv_datasets(PORTAL_GRAPHS)
+    slugs = [d["slug"] for d in ds]
+    assert len(slugs) == len(set(slugs))  # distinct dataset identities
+    re_ds = [d for d in ds if d["page_url"].endswith("/renewable-statistics/")]
+    assert [d["csv_file"] for d in re_ds] == [
+        "RE_Current_Installed_Capacity.csv", "RE_Annual_Energy_Contribution.csv",
+        "RE_Maximum_Contribution.csv", "RE_Maximum_Peak_Difference.csv"]
+    assert re_ds[0]["slug"] == "renewables-performance/renewable-statistics"  # history keeps its slug
+    assert len(ds) == len(PORTAL_GRAPHS) + 3

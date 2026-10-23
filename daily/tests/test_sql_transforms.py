@@ -64,3 +64,10 @@ def test_scrapes_passthrough(con):
     c = res[res["slug"] == "s/c"].iloc[0]
     assert c["http_status"] == 404
     assert c["error"] == "page fetch HTTP 404"
+
+
+def test_content_keeps_identical_bodies_of_distinct_datasets_apart(con):
+    con.execute("""INSERT INTO raw.portal_csv_fetch VALUES
+        ('2026-06-03 04:09:00', 's/a/sibling', 'sec', 'A2', 'p/a', 'u/a2', 200, 'hashA', 'e', 'lm', '10', 'textA', NULL)""")
+    res = con.execute(sql_body("portal_csv_content.sql")).fetchdf()
+    assert {("s/a", "hashA"), ("s/a/sibling", "hashA")} <= set(zip(res["slug"], res["content_hash"]))
