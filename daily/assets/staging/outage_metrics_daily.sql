@@ -14,8 +14,9 @@ description: |
       2. staging.uclf_oclf_trend_hourly (hourly CSV with PowerBI backup)
          - publishes combined UCLF+OCLF only, in MW. No PCLF.
          - used to refine UCLF for the recent tail (UCLF = combined - OCLF_weekly).
-      3. raw.weekly_capacity_breakdown_powerbi (weekly, ~1 week behind)
-         - publishes Weekly EAF / PCLF / UCLF / OCLF as percentages.
+      3. staging.eaf_weekly_official (weekly, ~1 week behind)
+         - Eskom's published Weekly EAF / PCLF / UCLF / OCLF percentages,
+           each week one coherent snapshot.
          - step-held forward to backfill PCLF / OCLF when only the CSV/PowerBI trend has
            UCLF data, and to fill the freshest end where neither hourly source
            has anything.
@@ -36,7 +37,7 @@ materialization:
 depends:
     - raw.esk_bulk_content
     - staging.uclf_oclf_trend_hourly
-    - raw.weekly_capacity_breakdown_powerbi
+    - staging.eaf_weekly_official
     - staging.installed_capacity_monthly
 
 columns:
@@ -74,6 +75,35 @@ custom_checks:
           SELECT CASE WHEN MAX(day) > (now() - INTERVAL 7 DAY)::DATE THEN 1 ELSE 0 END
           FROM staging.outage_metrics_daily
       value: 1
+    - name: derived_vs_official_within_5pp
+      blocking: false
+      description: |
+          Derived weekly EAF (avg of staging.outage_metrics_daily over the same
+          Mon-anchored week) stays within 5 pp of Eskom's published weekly EAF
+          on the trailing 8 published weeks. Non-blocking drift alarm.
+          Since the official weeks became coherent snapshots (2026-10-23) the
+          trailing weeks agree within ~0.1 pp. The earlier "~2-3.5 pp low"
+          gap was the official side mixing components across revisions.
+      query: |
+          WITH derived AS (
+              SELECT date_trunc('week', day)::DATE AS week_start,
+                     AVG(eaf_pct) AS eaf_derived
+              FROM staging.outage_metrics_daily
+              WHERE eaf_pct IS NOT NULL
+              GROUP BY 1
+              HAVING COUNT(*) = 7
+          ),
+          recent_official AS (
+              SELECT week_start, eaf_pct
+              FROM staging.eaf_weekly_official
+              ORDER BY week_start DESC
+              LIMIT 8
+          )
+          SELECT COUNT(*)
+          FROM recent_official o
+          JOIN derived d USING (week_start)
+          WHERE ABS(o.eaf_pct - d.eaf_derived) > 5
+      value: 0
 @bruin */
 
 WITH cap_latest AS (
@@ -107,14 +137,8 @@ trend_daily AS (
     HAVING COUNT(*) >= 20  -- drop partial days (latest partial hour is incomplete)
 ),
 weekly_long AS (
-    -- one row per week-start with all four series pivoted wide
-    SELECT
-        week_start::DATE AS week_start,
-        MAX(value) FILTER (WHERE series = 'Weekly PCLF') AS pclf_pct,
-        MAX(value) FILTER (WHERE series = 'Weekly UCLF') AS uclf_pct,
-        MAX(value) FILTER (WHERE series = 'Weekly OCLF') AS oclf_pct
-    FROM raw.weekly_capacity_breakdown_powerbi
-    GROUP BY 1
+    SELECT week_start, pclf_pct, uclf_pct, oclf_pct
+    FROM staging.eaf_weekly_official
 ),
 -- Axis = only days where at least one *hourly* source has real data. Weekly
 -- snapshots are step-held to fill component gaps within this range, but they

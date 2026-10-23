@@ -34,7 +34,7 @@ def test_portal_csv_fetch_contract(monkeypatch):
     mod = load_asset("portal_csv_fetch.py")
     monkeypatch.setattr(mod, "PORTAL_GRAPHS", GRAPHS)
 
-    def fake_scrape(page_url):
+    def fake_scrape(page_url, csv_file=None):
         if page_url.endswith("good/"):
             return {"csv_url": "https://x/f.csv", "http_status": 200,
                     "content_text": "a,b\n1,2\n", "error": None,
@@ -97,3 +97,29 @@ def test_portal_powerbi_fetch_contract(monkeypatch):
     boom = by["s/boom"]
     assert "RuntimeError" in boom["error"]
     assert pd.isna(boom["response_hash"])
+
+
+def test_portal_csv_fetch_multi_file_page(monkeypatch):
+    mod = load_asset("portal_csv_fetch.py")
+    monkeypatch.setattr(mod, "PORTAL_GRAPHS", [
+        {"slug": "s/re", "section": "RE", "name": "RE", "page_url": "https://e/re/"}])
+    import eskom_portal.catalog as catalog
+    monkeypatch.setattr(catalog, "PORTAL_CSV_FILES", {"s/re": [
+        ("A.csv", "s/re", "RE: A"), ("B.csv", "s/re/b", "RE: B"), ("C.csv", "s/re/c", "RE: C")]})
+
+    def fake_scrape(page_url, csv_file=None):
+        if csv_file == "B.csv":
+            raise TimeoutError("B timed out")
+        # identical bodies on two files must stay two datasets
+        return {"csv_url": f"https://x/2026/10/{csv_file}", "http_status": 200,
+                "content_text": "a,b\n1,2\n", "error": None,
+                "etag": csv_file, "last_modified": None, "content_length": None}
+
+    monkeypatch.setattr(mod, "scrape_csv", fake_scrape)
+    df = mod.materialize()
+    by = {r["slug"]: r for _, r in df.iterrows()}
+    assert list(by) == ["s/re", "s/re/b", "s/re/c"]
+    assert by["s/re"]["csv_url"].endswith("A.csv") and by["s/re"]["etag"] == "A.csv"
+    assert "TimeoutError" in by["s/re/b"]["error"] and pd.isna(by["s/re/b"]["content_hash"])
+    assert by["s/re/c"]["content_hash"] == by["s/re"]["content_hash"]
+    assert by["s/re/c"]["name"] == "RE: C"

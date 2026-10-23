@@ -8,6 +8,11 @@ re-discover them from each page on every run.
 
 `slug` is the path after /dataportal/ and is used as the join key across the
 scraper tables and the dashboard JSON.
+
+A few pages link more than one CSV file. PORTAL_CSV_FILES gives each file its
+own dataset slug so the files are scraped, logged and deduplicated
+independently (raw.portal_csv* key on slug). Files are matched by file name
+because the /wp-content/uploads/YYYY/MM/ part of the link moves monthly.
 """
 
 PORTAL_GRAPHS: list[dict[str, str]] = [
@@ -37,3 +42,36 @@ PORTAL_GRAPHS: list[dict[str, str]] = [
     {"section": "Emissions", "name": "Atmospheric Emission License Reports", "slug": "emissions/ael", "page_url": "https://www.eskom.co.za/dataportal/emissions/ael/"},
     {"section": "Emissions", "name": "GHG Emissions", "slug": "emissions/elementor-291086", "page_url": "https://www.eskom.co.za/dataportal/emissions/elementor-291086/"},
 ]
+
+# graph slug -> [(csv file name, dataset slug, dataset name)]. The first file
+# keeps the graph slug, so the history scraped before the split carries on.
+PORTAL_CSV_FILES: dict[str, list[tuple[str, str, str]]] = {
+    "renewables-performance/renewable-statistics": [
+        ("RE_Current_Installed_Capacity.csv",
+         "renewables-performance/renewable-statistics",
+         "Renewable Statistics: current installed capacity"),
+        ("RE_Annual_Energy_Contribution.csv",
+         "renewables-performance/renewable-statistics/annual-energy-contribution",
+         "Renewable Statistics: annual energy contribution"),
+        ("RE_Maximum_Contribution.csv",
+         "renewables-performance/renewable-statistics/maximum-contribution",
+         "Renewable Statistics: maximum contribution"),
+        ("RE_Maximum_Peak_Difference.csv",
+         "renewables-performance/renewable-statistics/maximum-peak-difference",
+         "Renewable Statistics: maximum peak difference"),
+    ],
+}
+
+
+def csv_datasets(graphs: list[dict[str, str]]) -> list[dict[str, str | None]]:
+    """One entry per CSV dataset: the graph's fields plus `csv_file` (None =
+    the page's first CSV link), with slug/name overridden for multi-file pages."""
+    out: list[dict[str, str | None]] = []
+    for g in graphs:
+        files = PORTAL_CSV_FILES.get(g["slug"])
+        if not files:
+            out.append({**g, "csv_file": None})
+            continue
+        for csv_file, slug, name in files:
+            out.append({**g, "slug": slug, "name": name, "csv_file": csv_file})
+    return out

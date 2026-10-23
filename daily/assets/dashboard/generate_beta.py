@@ -24,6 +24,13 @@ depends:
 description: |
     Generates beta.unofficialeskom.com/static/dashboard-data.json. Reads
     mostly from staging.* tables (plus a few raw.* reads listed above).
+
+    Time convention: every chart timestamp is SAST wall-clock (Eskom
+    publishes SAST, UTC+2, no DST) encoded as epoch ms of that wall-clock
+    read as UTC, so the site's getUTC*() rendering shows SAST and day buckets
+    are SAST days. Staging timestamps are naive SAST; raw TIMESTAMPTZ data
+    columns carry SAST wall-clock as UTC. Nothing here depends on the DuckDB
+    session or process time zone.
     Chart→column lineage is declared in CHART_SOURCES and validated against
     duckdb's information_schema at build time so a renamed staging column
     fails the build instead of silently emptying a chart. The site's "Data
@@ -32,7 +39,7 @@ description: |
 
 import json
 import re
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date, timezone
 from pathlib import Path
 
 import duckdb
@@ -140,6 +147,10 @@ def validate_chart_sources(conn: duckdb.DuckDBPyConnection) -> None:
 
 
 def _ts_ms(dt: datetime) -> int:
+    """Epoch ms of a wall-clock reading taken as UTC (see Time convention).
+
+    Naive values are wall-clock already. Aware values are raw TIMESTAMPTZ
+    data columns, whose UTC wall-clock is the SAST reading."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp() * 1000)
@@ -398,7 +409,7 @@ def load_portal_catalog(conn: duckdb.DuckDBPyConnection) -> list[dict]:
     link (None if the portal offers none), latest is the newest data date we
     hold (None if we parsed no dated rows), rows is the parsed point count.
     """
-    from eskom_portal.catalog import PORTAL_GRAPHS
+    from eskom_portal.catalog import PORTAL_GRAPHS, csv_datasets
 
     # Latest discovered links (fetch tables are create+replace → this run only).
     csv_url = dict(conn.execute(
@@ -450,7 +461,8 @@ def load_portal_catalog(conn: duckdb.DuckDBPyConnection) -> list[dict]:
             row[0]: (row[1], int(row[2]))
             for row in conn.execute(
                 "SELECT slug, "
-                "strftime(timezone('Africa/Johannesburg', MAX(timestamp)), '%Y-%m-%d') AS latest, "
+                # data timestamps carry SAST wall-clock as UTC
+                "strftime(timezone('UTC', MAX(timestamp)), '%Y-%m-%d') AS latest, "
                 "COUNT(value) AS rows "
                 f"FROM {table} GROUP BY slug"
             ).fetchall()
@@ -465,7 +477,8 @@ def load_portal_catalog(conn: duckdb.DuckDBPyConnection) -> list[dict]:
                 "published": published.get(slug)}
 
     catalog = []
-    for g in PORTAL_GRAPHS:
+    # One entry per CSV dataset: pages that link several CSVs list each file.
+    for g in csv_datasets(PORTAL_GRAPHS):
         csv = cell(g["slug"], csv_url, csv_fresh, csv_published)
         pbi = cell(g["slug"], pbi_url, pbi_fresh, pbi_published)
         # We don't care which source it came from — surface the freshest data
@@ -645,19 +658,47 @@ def load_re_installed(conn: duckdb.DuckDBPyConnection) -> list[list]:
     return out
 
 
+# Latest revision per (series, timestamp) for one slug of a generic portal
+# sweep. A payload's observation time is the later of its first ingest and its
+# last logged scrape; ties break on the payload hash, so the pick never depends
+# on row order.
+_PORTAL_LATEST_SQL = """
+    WITH seen AS (
+        SELECT {payload}, MAX(seen_at) AS seen_at
+        FROM (
+            SELECT {payload}, first_seen_at AS seen_at FROM {table}_content WHERE slug = $slug
+            UNION ALL
+            SELECT {payload}, scraped_at FROM {table}_scrapes
+            WHERE slug = $slug AND {hash} IS NOT NULL
+        )
+        GROUP BY ALL
+    )
+    SELECT series, timestamp, value
+    FROM {table} t
+    LEFT JOIN seen s USING ({payload})
+    WHERE t.slug = $slug AND t.timestamp IS NOT NULL AND t.value IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY series, timestamp
+        ORDER BY s.seen_at DESC NULLS LAST, t.{hash} DESC, t.value DESC
+    ) = 1
+"""
+
+
 def _portal_series(conn: duckdb.DuckDBPyConnection, slug: str) -> dict[str, dict[int, float]]:
     """All dated points we hold for a portal graph, merged across CSV + PowerBI.
 
-    Returns {series_name: {ts_ms: value}}. We don't care which source a point
-    came from; later writes (PowerBI usually has fuller coverage) win on a
-    timestamp collision.
+    Returns {series_name: {ts_ms: value}}. Within a source the most recently
+    observed revision wins; across sources PowerBI (usually fuller coverage)
+    wins on a timestamp collision.
     """
     out: dict[str, dict[int, float]] = {}
-    for tbl in ("raw.portal_csv", "raw.portal_powerbi"):
+    for table, payload, hash_col in (
+        ("raw.portal_csv", "content_hash", "content_hash"),
+        ("raw.portal_powerbi", "visual_id, response_hash", "response_hash"),
+    ):
         rows = conn.execute(
-            f"SELECT series, timestamp, value FROM {tbl} "
-            "WHERE slug = ? AND timestamp IS NOT NULL AND value IS NOT NULL",
-            [slug],
+            _PORTAL_LATEST_SQL.format(table=table, payload=payload, hash=hash_col),
+            {"slug": slug},
         ).fetchall()
         for series, ts, val in rows:
             out.setdefault(series, {})[_ts_ms(ts)] = float(val)
@@ -786,10 +827,10 @@ def load_loadshedding(conn: duckdb.DuckDBPyConnection) -> dict:
         for event_at, stage in raw:
             if stage == 0:
                 # This is the most recent "off" event — streak started here
-                ts = datetime(event_at.year, event_at.month, event_at.day,
-                              event_at.hour, event_at.minute, event_at.second,
-                              tzinfo=timezone.utc)
-                streak_since_ms = int(ts.timestamp() * 1000)
+                # A real instant (TIMESTAMPTZ), not a SAST wall-clock reading.
+                if event_at.tzinfo is None:
+                    event_at = event_at.replace(tzinfo=timezone.utc)
+                streak_since_ms = int(event_at.timestamp() * 1000)
                 break
     except Exception:
         pass
@@ -847,7 +888,6 @@ def load_annual_financials() -> dict:
 # Eskom time-of-use peak windows (SAST): morning 06:00–08:59, evening
 # 17:00–20:59. OCGT is a peaking plant, so generation outside these windows
 # signals the grid leaning on it under stress.
-_SAST = timezone(timedelta(hours=2))
 _PEAK_HOURS_SAST = {6, 7, 8, 17, 18, 19, 20}
 # OCGT runs a ~150 MW IPP baseload almost continuously, so ">100 MW off-peak"
 # fires ~70 h/week even on a healthy grid. Use a real-dispatch floor instead:
@@ -896,7 +936,7 @@ def compute_outlook(merged: dict[int, dict[str, float]], latest_eaf: float | Non
         ocgt = rec.get("Eskom_OCGT_Generation", 0.0) + rec.get("Dispatchable_IPP_OCGT", 0.0)
         ocgt_peak_max = max(ocgt_peak_max, ocgt)
         if ocgt > _OCGT_OFFPEAK_DISPATCH_MW:
-            hr = datetime.fromtimestamp(ts / 1000, _SAST).hour
+            hr = datetime.fromtimestamp(ts / 1000, timezone.utc).hour  # SAST wall-clock
             if hr not in _PEAK_HOURS_SAST:
                 offpeak_hours += 1
                 offpeak_max = max(offpeak_max, ocgt)
@@ -1306,11 +1346,11 @@ def main() -> None:
     OUT_PATH.write_text(json.dumps(payload, separators=(",", ":")))
 
     size_kb = OUT_PATH.stat().st_size / 1024
-    latest_iso = datetime.fromtimestamp(data["latest_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if data["latest_ts"] else "?"
+    latest_iso = datetime.fromtimestamp(data["latest_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M SAST") if data["latest_ts"] else "?"
     print(f"  wrote {OUT_PATH} ({size_kb:.0f} KB)")
     print(f"  latest: {latest_iso}  gen: {data['latest_gen']:,} MW  demand: {data['latest_demand']:,} MW")
     if data["latest_eaf"] is not None:
-        eaf_when = datetime.fromtimestamp(data["latest_eaf_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        eaf_when = datetime.fromtimestamp(data["latest_eaf_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M SAST")
         print(f"  EAF (hourly derived): {data['latest_eaf']}% @ {eaf_when}")
 
 

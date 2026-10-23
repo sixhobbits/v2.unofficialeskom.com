@@ -13,10 +13,15 @@ description: |
       1. raw.weekly_capacity_breakdown_powerbi (live scrape, recent weeks)
       2. raw.eskom_metrics_weekly_breakdown (frozen snapshot, 2019-04 →)
 
-    The official-vs-derived reconciliation check below is the drift alarm for
-    the whole derived-EAF stack (capacity denominator, source merging, held
-    components): if the two diverge by more than 3 pp on recent full weeks,
-    something in the derivation (or Eskom's own restatement) moved.
+    PowerBI: every stored response is a complete published snapshot whose
+    four factors sum to 100 %. Per week, all four come from ONE response — the
+    most recently observed one (later of first ingest and last logged scrape;
+    ties on response hash) that carries all four for that week. Taking each
+    factor's MAX across revisions built combinations Eskom never published
+    (sums up to 104 %).
+
+    The official-vs-derived drift alarm lives on staging.outage_metrics_daily,
+    which consumes this table.
 
 materialization:
     type: table
@@ -24,8 +29,9 @@ materialization:
 
 depends:
     - raw.weekly_capacity_breakdown_powerbi
+    - raw.weekly_capacity_breakdown_powerbi_content
+    - raw.weekly_capacity_breakdown_powerbi_scrapes
     - raw.eskom_metrics_weekly_breakdown
-    - staging.outage_metrics_daily
 
 columns:
     - name: week_start
@@ -48,63 +54,68 @@ columns:
       type: VARCHAR
 
 custom_checks:
-    - name: derived_vs_official_within_5pp
-      blocking: false
+    - name: factors_sum_to_100
       description: |
-          Derived weekly EAF (avg of staging.outage_metrics_daily over the same
-          Mon-anchored week) stays within 5 pp of Eskom's published weekly EAF
-          on the trailing 8 published weeks. Non-blocking drift alarm.
-          Known bias, don't chase below 5 pp: on tail weeks where UCLF comes
-          from the hourly trend CSV, the derived EAF runs ~2-3.5 pp LOW —
-          Eskom's trend CSV (UCLF+OCLF MW) reads hotter than the UCLF in their
-          own weekly report (observed 2026-06: derived 65.4 vs official 69.0).
-          Weeks fully covered by the bulk feed agree to ~0.2 pp.
+          EAF + PCLF + UCLF + OCLF is 100 % (± 0.5 pp rounding) for every
+          PowerBI week — the factors partition capacity, so any other sum
+          means components from different revisions were mixed.
       query: |
-          WITH derived AS (
-              SELECT date_trunc('week', day)::DATE AS week_start,
-                     AVG(eaf_pct) AS eaf_derived
-              FROM staging.outage_metrics_daily
-              WHERE eaf_pct IS NOT NULL
-              GROUP BY 1
-              HAVING COUNT(*) = 7
-          ),
-          recent_official AS (
-              SELECT week_start, eaf_pct
-              FROM staging.eaf_weekly_official
-              ORDER BY week_start DESC
-              LIMIT 8
-          )
-          SELECT COUNT(*)
-          FROM recent_official o
-          JOIN derived d USING (week_start)
-          WHERE ABS(o.eaf_pct - d.eaf_derived) > 5
+          SELECT COUNT(*) FROM staging.eaf_weekly_official
+          WHERE src = 'powerbi'
+            AND ABS(eaf_pct + pclf_pct + uclf_pct + oclf_pct - 100) > 0.5
+      blocking: false
       value: 0
 @bruin */
 
-WITH unified AS (
+WITH seen AS (
+    SELECT visual_id, response_hash, MAX(seen_at) AS seen_at
+    FROM (
+        SELECT visual_id, response_hash, first_seen_at AS seen_at FROM raw.weekly_capacity_breakdown_powerbi_content
+        UNION ALL
+        SELECT visual_id, response_hash, scraped_at FROM raw.weekly_capacity_breakdown_powerbi_scrapes WHERE response_hash IS NOT NULL
+    )
+    GROUP BY ALL
+),
+-- one complete snapshot per (response, week)
+snapshots AS (
     SELECT
-        week_start::DATE AS week_start,
-        MAX(value) FILTER (WHERE series = 'Weekly EAF')  AS eaf_pct,
-        MAX(value) FILTER (WHERE series = 'Weekly PCLF') AS pclf_pct,
-        MAX(value) FILTER (WHERE series = 'Weekly UCLF') AS uclf_pct,
-        MAX(value) FILTER (WHERE series = 'Weekly OCLF') AS oclf_pct,
-        'powerbi' AS src,
-        1 AS priority
-    FROM raw.weekly_capacity_breakdown_powerbi
-    WHERE week_start IS NOT NULL
-    GROUP BY week_start::DATE
+        timezone('UTC', p.week_start)::DATE AS week_start,
+        p.response_hash,
+        s.seen_at,
+        MAX(p.value) FILTER (WHERE p.series = 'Weekly EAF')  AS eaf_pct,
+        MAX(p.value) FILTER (WHERE p.series = 'Weekly PCLF') AS pclf_pct,
+        MAX(p.value) FILTER (WHERE p.series = 'Weekly UCLF') AS uclf_pct,
+        MAX(p.value) FILTER (WHERE p.series = 'Weekly OCLF') AS oclf_pct
+    FROM raw.weekly_capacity_breakdown_powerbi p
+    LEFT JOIN seen s USING (visual_id, response_hash)
+    WHERE p.week_start IS NOT NULL
+    GROUP BY ALL
+    HAVING COUNT(*) FILTER (WHERE p.series = 'Weekly EAF')  = 1
+       AND COUNT(*) FILTER (WHERE p.series = 'Weekly PCLF') = 1
+       AND COUNT(*) FILTER (WHERE p.series = 'Weekly UCLF') = 1
+       AND COUNT(*) FILTER (WHERE p.series = 'Weekly OCLF') = 1
+),
+unified AS (
+    SELECT week_start, eaf_pct, pclf_pct, uclf_pct, oclf_pct,
+           'powerbi' AS src, 1 AS priority, seen_at, response_hash AS payload
+    FROM snapshots
     UNION ALL
     SELECT
         week_start::DATE,
         eaf, pclf, uclf, oclf,
         'metrics_sqlite' AS src,
-        2 AS priority
+        2 AS priority,
+        NULL,
+        NULL
     FROM raw.eskom_metrics_weekly_breakdown
     WHERE week_start IS NOT NULL AND eaf IS NOT NULL
 ),
 ranked AS (
     SELECT *,
-           ROW_NUMBER() OVER (PARTITION BY week_start ORDER BY priority) AS rn
+           ROW_NUMBER() OVER (
+               PARTITION BY week_start
+               ORDER BY priority, seen_at DESC NULLS LAST, payload DESC NULLS LAST
+           ) AS rn
     FROM unified
     WHERE eaf_pct IS NOT NULL
 )

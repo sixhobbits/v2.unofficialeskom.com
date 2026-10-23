@@ -422,7 +422,8 @@ export default function Dashboard(): ReactNode {
 
   const displayTs = useMemo(() => {
     if (!data?.latestTs) return 'Unknown';
-    return new Date(data.latestTs).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    // latestTs encodes SAST wall-clock as UTC (see generate_beta).
+    return new Date(data.latestTs).toISOString().replace('T', ' ').slice(0, 16) + ' SAST';
   }, [data?.latestTs]);
 
   const rooftopColorByProv = useMemo(() => {

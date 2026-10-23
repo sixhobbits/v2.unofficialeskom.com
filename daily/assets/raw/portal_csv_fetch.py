@@ -15,7 +15,9 @@ depends:
 
 description: |
     Generic CSV scrape across EVERY graph in eskom_portal.catalog.PORTAL_GRAPHS
-    — one row per graph, holding THIS run's response. Re-discovers each page's
+    — one row per CSV dataset (one per graph, except pages listed in
+    catalog.PORTAL_CSV_FILES, which get one per file), holding THIS run's
+    response. A failed file only errors its own row. Re-discovers each page's
     CSV download URL (those move over time) and stores the raw body for replay.
     Downstream SQL splits this into the _scrapes log and the deduped _content
     store; raw.portal_csv parses it.
@@ -60,17 +62,17 @@ import hashlib
 
 import pandas as pd
 
-from eskom_portal.catalog import PORTAL_GRAPHS
+from eskom_portal.catalog import PORTAL_GRAPHS, csv_datasets
 from eskom_portal.csv_scrape import scrape_csv
 
 
 def materialize() -> pd.DataFrame:
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0, tzinfo=None)
     rows: list[dict] = []
-    for g in PORTAL_GRAPHS:
+    for g in csv_datasets(PORTAL_GRAPHS):
         etag = last_modified = content_length = None
         try:
-            r = scrape_csv(g["page_url"])
+            r = scrape_csv(g["page_url"], g["csv_file"])
             csv_url, http_status = r["csv_url"], r["http_status"]
             content_text, error = r["content_text"], r["error"]
             etag, last_modified, content_length = r["etag"], r["last_modified"], r["content_length"]
