@@ -41,21 +41,17 @@ WITH unified AS (
     SELECT timestamp AS ts, uclf_oclf_mw, 1 AS priority
     FROM staging.uclf_oclf_trend_hourly
     UNION ALL
-    SELECT timestamp AS ts, uclf_oclf_mw, 3 AS priority
+    -- raw TIMESTAMPTZ carries SAST wall-clock as UTC; staging is naive SAST
+    SELECT timezone('UTC', timestamp) AS ts, uclf_oclf_mw, 3 AS priority
     FROM raw.eskom_metrics_uclf_oclf_hourly
     WHERE uclf_oclf_mw IS NOT NULL AND timestamp IS NOT NULL
 ),
--- a source can carry the same hour more than once (multiple scraped content
--- versions); collapse to one value per (priority, hour) before ranking
-per_source AS (
-    SELECT priority, ts, AVG(uclf_oclf_mw) AS uclf_oclf_mw
-    FROM unified
-    GROUP BY priority, ts
-),
+-- both inputs hold one value per hour (the trend table already resolved
+-- revisions), so ranking by source priority alone is deterministic
 ranked AS (
     SELECT ts, uclf_oclf_mw,
-           ROW_NUMBER() OVER (PARTITION BY ts ORDER BY priority) AS rn
-    FROM per_source
+           ROW_NUMBER() OVER (PARTITION BY ts ORDER BY priority, uclf_oclf_mw DESC) AS rn
+    FROM unified
 ),
 hourly AS (
     SELECT ts, uclf_oclf_mw FROM ranked WHERE rn = 1

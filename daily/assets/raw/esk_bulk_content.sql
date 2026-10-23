@@ -10,6 +10,14 @@ description: |
     sqlite rebuild upstream. Rows absent from the source are kept (merge never
     deletes), so history the portal no longer serves survives.
 
+    timestamp is the SAST wall-clock hour beginning ("Date Time Hour
+    Beginning"), as a naive TIMESTAMP. raw.esk_bulk_fetch lands it as
+    TIMESTAMPTZ carrying that wall-clock as UTC, so it converts with
+    timezone('UTC', …). A bare cast to TIMESTAMP applies the session zone:
+    on thet (Europe/Berlin) that shifted every hour +1 h (winter) / +2 h
+    (summer) and merged the two hours either side of each October clock
+    change into one key.
+
 materialization:
     type: table
     strategy: merge
@@ -33,5 +41,5 @@ columns:
       update_on_merge: true
 @bruin */
 
-SELECT timestamp, series, value
+SELECT timezone('UTC', timestamp) AS timestamp, series, TRY_CAST(value AS DOUBLE) AS value
 FROM raw.esk_bulk_fetch

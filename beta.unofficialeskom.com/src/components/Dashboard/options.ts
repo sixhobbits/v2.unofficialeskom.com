@@ -163,7 +163,8 @@ export function timeSeriesOption(
           ? ''
           : '-' +
             String(d.getUTCDate()).padStart(2, '0') +
-            (hourly ? ' ' + String(d.getUTCHours()).padStart(2, '0') + ':00 UTC' : ''));
+            // Chart epochs encode SAST wall-clock as UTC (see generate_beta).
+            (hourly ? ' ' + String(d.getUTCHours()).padStart(2, '0') + ':00 SAST' : ''));
     const header = d ? ymd : params[0].axisValueLabel;
     return (
       '<div style="font-weight:600;margin-bottom:4px">' +
