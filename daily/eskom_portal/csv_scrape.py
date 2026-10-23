@@ -237,8 +237,15 @@ def _latest(rows: list[dict]) -> dt.datetime | None:
 
 # ---------- main entry point ----------
 
-def scrape_csv(page_url: str) -> dict[str, Any]:
+def _file_name(url: str) -> str:
+    return urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1].lower()
+
+
+def scrape_csv(page_url: str, csv_file: str | None = None) -> dict[str, Any]:
     """Fetch the linked CSV; recover stale links via newer monthly upload paths.
+
+    csv_file picks one link by file name on pages that link several CSVs;
+    None takes the page's first CSV link.
 
     Returns:
       {
@@ -276,6 +283,11 @@ def scrape_csv(page_url: str) -> dict[str, Any]:
         return result
 
     links = _csv_links(page_url, page_body)
+    if csv_file is not None:
+        links = [l for l in links if _file_name(l) == csv_file.lower()]
+        if not links:
+            result["error"] = f"no {csv_file} link on graph page"
+            return result
     if not links:
         result["error"] = "no CSV link on graph page"
         return result
