@@ -63,10 +63,10 @@ def materialize() -> pd.DataFrame:
 
     out = []
     for content_hash, pdf_url, filename, pdf_path in rows:
-        if pdf_path and not Path(pdf_path).exists() and filename:
-            current_path = PDF_DIR / filename
-            if current_path.exists():
-                pdf_path = str(current_path)
+        # Stored pdf_path may point at another host's (possibly unreadable)
+        # directory; always prefer this checkout's warehouse copy.
+        if filename and (PDF_DIR / filename).is_file():
+            pdf_path = str(PDF_DIR / filename)
         if not pdf_path:
             out.append({
                 "content_hash": content_hash, "pdf_url": pdf_url,

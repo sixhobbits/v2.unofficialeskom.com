@@ -45,6 +45,12 @@ DB_PATH = (
     Path(__file__).resolve().parents[3]
     / "warehouse" / "media_presentations" / "index.duckdb"
 )
+# pdf_path in *_content is the absolute path on whichever host first downloaded
+# the PDF (laptop, het, oc). Resolve against this checkout's warehouse instead.
+PDF_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "warehouse" / "integrated_results" / "pdfs"
+)
 
 
 def materialize() -> pd.DataFrame:
@@ -59,6 +65,8 @@ def materialize() -> pd.DataFrame:
 
     out = []
     for content_hash, pdf_url, filename, pdf_path in rows:
+        if filename and (PDF_DIR / filename).is_file():
+            pdf_path = str(PDF_DIR / filename)
         if not pdf_path:
             out.append({
                 "content_hash": content_hash, "pdf_url": pdf_url,
