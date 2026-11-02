@@ -96,8 +96,15 @@ const config: Config = {
   ],
 
   themeConfig: {
-    // Replace with your project's social card
-    image: 'img/og-card.jpg',
+    // Social card. Content sits in the centre 630×630 square because Slack and
+    // others crop link-preview thumbnails to a square. Rename the file when
+    // changing it so unfurl caches fetch the new image.
+    image: 'img/og-card-v2.jpg',
+    metadata: [
+      {property: 'og:image:width', content: '1200'},
+      {property: 'og:image:height', content: '630'},
+      {property: 'og:image:alt', content: 'Unofficial Eskom: the state of the grid, in plain numbers.'},
+    ],
     colorMode: {
       respectPrefersColorScheme: false,
     },
