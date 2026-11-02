@@ -1,6 +1,6 @@
 # v2.unofficialeskom.com
 
-Bruin data pipelines + Docusaurus dashboard for https://beta.unofficialeskom.com.
+Bruin data pipelines + Docusaurus dashboard for https://unofficialeskom.com.
 
 ## Layout
 
