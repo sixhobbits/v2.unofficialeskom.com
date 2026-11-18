@@ -30,7 +30,7 @@ export type DashboardData = {
   ocgtMonthlyAvg: Point[]; ocgtMonthlyMax: Point[];
   genAvg: Point[]; genMax: Point[];
   demandAvg: Point[]; demandMax: Point[];
-  availableCapacityAvg: Point[]; headroomAvg: Point[];
+  availableCapacityAvg: Point[]; headroomAvg: Point[]; headroomMin: Point[];
   pclfAvg: Point[]; uclfAvg: Point[]; oclfAvg: Point[];
   clfPlanned: Point[]; clfUnplanned: Point[]; clfOther: Point[]; clfTotal: Point[];
   iosAvg: Point[]; mlrAvg: Point[]; ilsAvg: Point[]; totalReductionAvg: Point[];
@@ -85,7 +85,7 @@ export function normalize(raw: any): DashboardData {
     ocgtMonthlyAvg: arr(j.ocgtMonthlyAvg), ocgtMonthlyMax: arr(j.ocgtMonthlyMax),
     genAvg: arr(j.genAvg), genMax: arr(j.genMax),
     demandAvg: arr(j.demandAvg), demandMax: arr(j.demandMax),
-    availableCapacityAvg: arr(j.availableCapacityAvg), headroomAvg: arr(j.headroomAvg),
+    availableCapacityAvg: arr(j.availableCapacityAvg), headroomAvg: arr(j.headroomAvg), headroomMin: arr(j.headroomMin),
     pclfAvg: arr(j.pclfAvg), uclfAvg: arr(j.uclfAvg), oclfAvg: arr(j.oclfAvg),
     clfPlanned: arr(j.clfPlanned), clfUnplanned: arr(j.clfUnplanned),
     clfOther: arr(j.clfOther), clfTotal: arr(j.clfTotal),

@@ -317,6 +317,9 @@ def load_demand_capacity(conn: duckdb.DuckDBPyConnection) -> dict:
         "available_capacity_avg": _agg(cap_h, "mean"),
         "demand_capacity_residual_demand_avg": _agg(dem_h, "mean"),
         "headroom_avg": _agg(hr_h, "mean"),
+        # Tightest hour of each day — the evening peak. A daily mean can be
+        # comfortably positive while the peak hour still runs short.
+        "headroom_min": _agg(hr_h, "min"),
         "headroom_min_3d": headroom_min_3d,
     }
 
@@ -1210,6 +1213,7 @@ def build_payload(data: dict) -> dict:
         "demandMax":       data["demand_max"],
         "availableCapacityAvg": data["available_capacity_avg"],
         "headroomAvg":          data["headroom_avg"],
+        "headroomMin":          data["headroom_min"],
         "pclfAvg":         data["pclf_avg"],
         "uclfAvg":         data["uclf_avg"],
         "oclfAvg":         data["oclf_avg"],
@@ -1322,6 +1326,7 @@ def main() -> None:
     data["rooftop_pv"]       = rooftop_pv
     data["available_capacity_avg"] = demand_capacity["available_capacity_avg"]
     data["headroom_avg"]           = demand_capacity["headroom_avg"]
+    data["headroom_min"]           = demand_capacity["headroom_min"]
     data["portal_catalog"]         = portal_catalog
 
     def _last(series: list[list]) -> float | None:
