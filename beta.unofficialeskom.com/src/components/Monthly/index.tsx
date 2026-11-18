@@ -47,6 +47,20 @@ function toMonthlyMax(daily: Point[] | undefined): Point[] {
   return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([ts, v]) => [ts, v]);
 }
 
+// Daily [ts, value] → one point per calendar month taking the MONTHLY MIN (the
+// worst of the daily-minimums). Used for the headroom "worst hour" view.
+function toMonthlyMin(daily: Point[] | undefined): Point[] {
+  if (!daily) return [];
+  const buckets = new Map<number, number>();
+  for (const [ts, v] of daily) {
+    if (v == null) continue;
+    const d = new Date(ts);
+    const key = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    buckets.set(key, Math.min(buckets.get(key) ?? Infinity, v));
+  }
+  return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([ts, v]) => [ts, v]);
+}
+
 // The trailing month is usually incomplete (Eskom data ends a few days in), and
 // a part-month average isn't comparable — so we cut it. Returns the start-of-
 // month for the incomplete trailing month (or null if the last month is full).
@@ -117,6 +131,7 @@ export default function Monthly(): ReactNode {
     const keep = (pts: Point[]) => (cut ? pts.filter((p) => p[0] < cut.ts) : pts);
     const m = (daily: Point[] | undefined) => keep(toMonthly(daily));
     const mMax = (daily: Point[] | undefined) => keep(toMonthlyMax(daily));
+    const mMin = (daily: Point[] | undefined) => keep(toMonthlyMin(daily));
 
     const eafDaily = combineDaily([data.pclfAvg, data.uclfAvg, data.oclfAvg], (v) => 100 - (v[0] + v[1] + v[2]));
     const dispatchableDaily = combineDaily(
@@ -124,7 +139,30 @@ export default function Monthly(): ReactNode {
       (v) => v[0] - (v[1] + v[2] + v[3] + v[4]),
     );
 
+    // Monthly-avg headroom as bars, red when the month ran a deficit on average.
+    const headroomBars = m(data.headroomAvg).map(([t, v]) => ({
+      value: [t, v],
+      itemStyle: {color: v != null && v < 0 ? '#d32f2f' : '#66bb6a'},
+    }));
+
     return {
+      capacityDemand: ts([
+        {...line('Available capacity', m(data.availableCapacityAvg), '#2e9e4f', 2), areaStyle: {color: 'rgba(46,158,79,0.12)'}},
+        line('Peak demand (avg daily peak)', m(data.demandMax), '#ef6c00'),
+        line('Demand (avg)', m(data.demandAvg), '#d32f2f'),
+      ], {unit: 'MW'}),
+      headroom: ts([
+        {type: 'bar', name: 'Average headroom', data: headroomBars, animation: false, barCategoryGap: '10%', itemStyle: {color: '#66bb6a'}},
+        {
+          ...line('Tightest hour (avg of daily minimum)', m(data.headroomMin), '#1976d2', 1.8),
+          markLine: {
+            silent: true, symbol: 'none', label: {show: false},
+            lineStyle: {color: P.axisLabel, type: 'solid', width: 1, opacity: 0.6},
+            data: [{yAxis: 0}],
+          },
+        },
+        {...line('Worst hour of the month', mMin(data.headroomMin), '#d32f2f', 1.2), lineStyle: {width: 1.2, color: '#d32f2f', type: 'dashed'}},
+      ], {unit: 'MW'}),
       eaf: ts([
         line('EAF (derived)', m(eafDaily), '#2e9e4f', 2),
         // Eskom's own published monthly EAF — already monthly, so only the
@@ -188,6 +226,21 @@ export default function Monthly(): ReactNode {
           dashboard. Drag the slider under any chart to zoom.
         </p>
       </header>
+
+      <h2 className={card.sectionTitle}>Does South Africa have a power surplus?</h2>
+      <p style={{margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--ifm-color-emphasis-700)', maxWidth: '60rem'}}>
+        Available capacity is what Eskom's fleet could actually deliver after planned, unplanned and
+        other outages. Headroom is that capacity minus demand. A positive average hides the evening
+        peak, so the second chart also tracks the tightest hour of each day: when that drops below
+        zero, demand outran available plant and the gap was closed with loadshedding, demand
+        curtailment, diesel peakers or emergency reserves.
+      </p>
+      <div className={card.chartGrid}>
+        <ChartCard title="Available capacity vs demand (monthly avg MW)" option={charts.capacityDemand} />
+      </div>
+      <div className={card.chartGrid}>
+        <ChartCard title="Headroom — available capacity minus demand (monthly MW)" option={charts.headroom} />
+      </div>
 
       <h2 className={card.sectionTitle}>Availability &amp; outages</h2>
       <div className={card.chartPair}>
