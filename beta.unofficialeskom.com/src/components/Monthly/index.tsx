@@ -227,21 +227,6 @@ export default function Monthly(): ReactNode {
         </p>
       </header>
 
-      <h2 className={card.sectionTitle}>Does South Africa have a power surplus?</h2>
-      <p style={{margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--ifm-color-emphasis-700)', maxWidth: '60rem'}}>
-        Available capacity is what Eskom's fleet could actually deliver after planned, unplanned and
-        other outages. Headroom is that capacity minus demand. A positive average hides the evening
-        peak, so the second chart also tracks the tightest hour of each day: when that drops below
-        zero, demand outran available plant and the gap was closed with loadshedding, demand
-        curtailment, diesel peakers or emergency reserves.
-      </p>
-      <div className={card.chartGrid}>
-        <ChartCard title="Available capacity vs demand (monthly avg MW)" option={charts.capacityDemand} />
-      </div>
-      <div className={card.chartGrid}>
-        <ChartCard title="Headroom — available capacity minus demand (monthly MW)" option={charts.headroom} />
-      </div>
-
       <h2 className={card.sectionTitle}>Availability &amp; outages</h2>
       <div className={card.chartPair}>
         <ChartCard title="Energy availability factor (monthly avg %)" option={charts.eaf} />
@@ -281,6 +266,21 @@ export default function Monthly(): ReactNode {
       </div>
       <div className={card.chartGrid}>
         <ChartCard title="Demand reduction — IOS / MLR / ILS (monthly peak MW)" option={charts.reductionMax} />
+      </div>
+
+      <h2 className={card.sectionTitle}>Does South Africa have a power surplus?</h2>
+      <p style={{margin: '0 0 0.75rem', fontSize: '0.9rem', color: 'var(--ifm-color-emphasis-700)', maxWidth: '60rem'}}>
+        Available capacity is what Eskom's fleet could actually deliver after planned, unplanned and
+        other outages. Headroom is that capacity minus demand. A positive average hides the evening
+        peak, so the second chart also tracks the tightest hour of each day: when that drops below
+        zero, demand outran available plant and the gap was closed with loadshedding, demand
+        curtailment, diesel peakers or emergency reserves.
+      </p>
+      <div className={card.chartGrid}>
+        <ChartCard title="Available capacity vs demand (monthly avg MW)" option={charts.capacityDemand} />
+      </div>
+      <div className={card.chartGrid}>
+        <ChartCard title="Headroom — available capacity minus demand (monthly MW)" option={charts.headroom} />
       </div>
     </div>
   );
